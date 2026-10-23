@@ -31,6 +31,7 @@ export function recoverInterruptedTasks() {
 }
 const decisions = { type:'object',properties:{ action:{enum:['read_file','analyze_typescript','propose_file','finish']},file:{type:'string'},content:{type:'string'},explanation:{type:'string'} },required:['action','file','content','explanation'],additionalProperties:false };
 export class AMUCore {
+  isBusy(){return this.active!==null;}
   private active: { id: string; controller: AbortController } | null = null;
   private prepare(body: any, owner: string): CoreTask {
     if (this.active) throw new EngineError(429,'A controlled development task is already running');

@@ -1,0 +1,147 @@
+{
+  "baselineCommit": "5df6a21",
+  "version": "1.4.0",
+  "finishedAt": "2026-10-23T21:48:07.845Z",
+  "health": {
+    "server": "AMU-Agent-2",
+    "version": "1.4.0",
+    "uptimeSeconds": 79.3228082,
+    "status": "ready",
+    "inferenceReady": true,
+    "maintenance": false,
+    "active": 0,
+    "queued": 0,
+    "engine": {
+      "backend": "amu-embedded-llama.cpp",
+      "state": "ready",
+      "ready": true,
+      "paused": false,
+      "model": "qwen2.5:1.5b",
+      "active": 0,
+      "queued": 0
+    }
+  },
+  "readinessStatus": 200,
+  "liveChecks": {
+    "time": "2026-10-23T21:37:22.266Z",
+    "passed": true,
+    "version": "1.4.0",
+    "health": {
+      "server": "AMU-Agent-2",
+      "version": "1.4.0",
+      "uptimeSeconds": 19.4149295,
+      "status": "ready",
+      "inferenceReady": true,
+      "maintenance": false,
+      "active": 0,
+      "queued": 0,
+      "engine": {
+        "backend": "amu-embedded-llama.cpp",
+        "state": "ready",
+        "ready": true,
+        "paused": false,
+        "model": "qwen2.5:1.5b",
+        "active": 0,
+        "queued": 0
+      }
+    },
+    "readinessStatus": 200,
+    "apiPid": 13064,
+    "supervisorPreserved": true,
+    "nativeWorkerRestart": true,
+    "productionWorkers": 1,
+    "realSseWithExistingClient": true,
+    "inferenceClientWorkerManagementDenied": true,
+    "consolidatedDashboard": true,
+    "network": {
+      "bindHost": "127.0.0.1",
+      "tls": false,
+      "allowedCidrs": [],
+      "remoteAdministration": false
+    },
+    "firewallModified": false,
+    "certificateTrustModified": false,
+    "twoComputerTest": false,
+    "modelSha256": "183715c435899236895da3869489cc30ac241476b4971a20285b1a462818a5b4"
+  },
+  "workerTests": {
+    "passed": true,
+    "time": "2026-10-23T21:34:17.051Z",
+    "checks": [
+      "dynamic registration remains unloaded, duplicate loading requires approval, two actual independent native PIDs",
+      "aggregate CPU and individual RAM admission reject extra workers before loading",
+      "two real simultaneous GGUF generations through common dispatcher",
+      "secondary native crash recovered automatically without replacing primary",
+      "stop releases native process and persists registry state"
+    ],
+    "peakParallelNativeGenerations": 2,
+    "resources": {
+      "queue": 16,
+      "threadBudget": 2,
+      "registeredWorkers": 4,
+      "readyWorkers": 1
+    },
+    "clientUsageFormatAvailable": true
+  },
+  "backupAndNetworkTests": {
+    "passed": true,
+    "time": "2026-10-23T21:46:34.050Z",
+    "checks": [
+      "AES-GCM hides secrets and paths, opaque binary data roundtrip, wrong password/tamper/traversal rejected, existing restore never overwritten",
+      "unique client names, bounded HTTP concurrency, consolidated dashboard, admin separation, maintenance backup, verified isolated restore, one-time streaming download, encrypted import and re-verification",
+      "LAN profile fails closed, matching certificate/key import, saved network remains inactive until restart, no firewall/trust modifications"
+    ]
+  },
+  "beforeBackup": {
+    "id": "c83b8a52-c6a9-4b6b-b7b7-1e2205d89327",
+    "createdAt": "2026-10-23T21:16:14.172Z",
+    "scope": "full",
+    "includesModels": true,
+    "encrypted": true,
+    "cipher": "AES-256-GCM",
+    "keySource": "local-recovery-key",
+    "files": 168,
+    "bytes": 988392222
+  },
+  "realFullRestore": {
+    "files": 168,
+    "bytes": 988368852,
+    "authenticated": true,
+    "backupId": "c83b8a52-c6a9-4b6b-b7b7-1e2205d89327",
+    "directory": "scratch\\restores\\b3757943-9a7b-432b-8914-c2f824ca2055",
+    "activated": false,
+    "message": "Verified recovery copy; current installation was not overwritten"
+  },
+  "finalEncryptedBackup": {
+    "id": "3341dac6-a43e-41d7-891b-7f65f58c59aa",
+    "createdAt": "2026-10-23T21:47:12.900Z",
+    "scope": "full",
+    "includesModels": true,
+    "encrypted": true,
+    "cipher": "AES-256-GCM",
+    "keySource": "local-recovery-key",
+    "files": 183,
+    "bytes": 988815865
+  },
+  "regressions": {
+    "build": true,
+    "session3Platform": true,
+    "session3Native": true,
+    "session2Core": true,
+    "session2RuntimeMemoryAndCancellation": true,
+    "centralApi": true,
+    "tlsLoopbackWithRealCa": true,
+    "networkFailClosed": true
+  },
+  "limitations": {
+    "productionWorkerCount": 1,
+    "twoComputerTest": false,
+    "remoteWorkers": false,
+    "automaticRestoreActivation": false,
+    "gpuInference": false,
+    "windowsAclHardeningApplied": false
+  },
+  "otherAmuProjectsModified": false,
+  "firewallModified": false,
+  "certificateTrustModified": false
+}

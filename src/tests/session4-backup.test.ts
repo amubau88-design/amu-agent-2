@@ -1,0 +1,44 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+const state=fs.mkdtempSync('scratch/session4-backup-test-'),root=path.resolve(state);
+process.env.AMU_CENTRAL_STATE_DIR=root+'/scratch/secrets';process.env.AMU_CORE_STATE_DIR=root+'/scratch/core';process.env.AMU_BACKUP_PROJECT_ROOT=root;
+fs.mkdirSync(root+'/scratch/secrets',{recursive:true});fs.mkdirSync(root+'/scratch/core',{recursive:true});
+const {createArchive,extractArchive}=await import('../backup/archive.ts');
+const {createAmuApiServer}=await import('../amu-api/server.ts');
+const {amuInference}=await import('../inference/engine.ts');
+const {maintenanceStatus,enterRequest,exclusiveMaintenance}=await import('../central/maintenance.ts');
+const api=createAmuApiServer();await new Promise<void>(r=>api.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${(api.address() as any).port}`;
+const key=fs.readFileSync(root+'/scratch/secrets/central-admin-key.txt','utf8').trim();
+async function call(route:string,body?:any,token=key){return fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});}
+async function json(route:string,body?:any){const r=await call(route,body);assert.ok([200,202].includes(r.status),await r.clone().text());return await r.json() as any;}
+async function jobResult(job:any){for(let i=0;i<200;i++){const current=(await json('/api/central/backups')).jobs.find((j:any)=>j.id===job.id);if(current.state==='failed')throw Error(current.error);if(current.state==='completed')return current.result;await new Promise(r=>setTimeout(r,20));}throw Error('Backup job deadline');}
+const checks:string[]=[];const password='session4-test-passphrase-only';
+try{
+ new vm.Script(fs.readFileSync('src/web-ui/public/admin.html','utf8').match(/<script>([\s\S]*)<\/script>/)![1]);
+ fs.writeFileSync(root+'/scratch/secrets/fixture-private-key.txt','PRIVATE-MARKER-FOR-ENCRYPTION-TEST');fs.writeFileSync(root+'/scratch/core/fixture.db',crypto.randomBytes(8192));
+ const archive=root+'/direct.amubak';await createArchive(root,archive,password,['scratch/secrets','scratch/core']);const encrypted=fs.readFileSync(archive);assert.ok(!encrypted.includes(Buffer.from('PRIVATE-MARKER')));assert.ok(!encrypted.includes(Buffer.from('fixture-private-key.txt')));
+ const restored=root+'/direct-restore';await extractArchive(archive,restored,password);assert.deepEqual(fs.readFileSync(restored+'/scratch/core/fixture.db'),fs.readFileSync(root+'/scratch/core/fixture.db'));await assert.rejects(extractArchive(archive,restored,password),(e:any)=>e.status===409);
+ await assert.rejects(extractArchive(archive,root+'/wrong-password','wrong-password-value'),(e:any)=>e.status===400);assert.equal(fs.existsSync(root+'/wrong-password'),false);
+ const tampered=root+'/tampered.amubak',bytes=Buffer.from(encrypted);bytes[bytes.length-1]^=1;fs.writeFileSync(tampered,bytes);await assert.rejects(extractArchive(tampered,root+'/tampered-restore',password));assert.equal(fs.existsSync(root+'/tampered-restore'),false);
+ // Authenticated, but malicious path: reject before any destination outside staging is opened.
+ const salt=crypto.randomBytes(32),iv=crypto.randomBytes(12),derived=crypto.scryptSync(password,salt,32,{N:32768,r:8,p:1,maxmem:64*1024**2});const header=Buffer.from('AMU-ENCRYPTED-2\n'+JSON.stringify({salt:salt.toString('base64'),iv:iv.toString('base64'),kdf:'scrypt-32768-8-1',cipher:'aes-256-gcm'})+'\n'),cipher=crypto.createCipheriv('aes-256-gcm',derived,iv);cipher.setAAD(header);const metadata=Buffer.from(JSON.stringify({path:'../escape.txt',bytes:0,sha256:crypto.createHash('sha256').digest('hex')})),length=Buffer.alloc(4);length.writeUInt32BE(metadata.length);const malicious=root+'/malicious.amubak';fs.writeFileSync(malicious,Buffer.concat([header,cipher.update(Buffer.concat([length,metadata])),cipher.final(),cipher.getAuthTag()]));await assert.rejects(extractArchive(malicious,root+'/unsafe-restore',password),(e:any)=>e.status===400||e.status===403);assert.equal(fs.existsSync(root+'/escape.txt'),false);
+ checks.push('AES-GCM hides secrets and paths, opaque binary data roundtrip, wrong password/tamper/traversal rejected, existing restore never overwritten');
+ const client=await json('/api/central/clients',{name:'unprivileged'});assert.equal((await call('/api/central/clients',{name:' UNPRIVILEGED '})).status,409);const dashboard=await json('/api/central/dashboard');assert.ok(dashboard.workers.workers.length>=1);assert.ok(dashboard.backups);const leaves:Array<()=>void>=[];for(let i=0;i<64;i++)leaves.push(enterRequest());assert.throws(()=>enterRequest(),(e:any)=>e.status===429);for(const leave of leaves)leave();assert.equal((await call('/api/central/backups',undefined,client.key)).status,403);assert.equal((await call('/api/central/workers',undefined,client.key)).status,403);
+ let release!:()=>void;const held=exclusiveMaintenance('test barrier',()=>new Promise<void>(r=>{release=r;}));assert.equal((await call('/api/central/dashboard')).status,200);assert.equal((await call('/api/client/status')).status,200);const blocked=await call('/v1/chat/completions',{messages:[{role:'user',content:'blocked'}]});assert.equal(blocked.status,503);assert.equal(blocked.headers.get('retry-after'),'5');release();await held;
+ const job=await json('/api/central/backups/create',{scope:'configuration',passphrase:password});const backup=await jobResult(job);assert.equal(backup.encrypted,true);assert.equal(maintenanceStatus().operation,null);
+ const verified=await jobResult(await json('/api/central/backups/verify',{id:backup.id,passphrase:password}));assert.equal(verified.authenticated,true);
+ const recovery=await jobResult(await json('/api/central/backups/restore',{id:backup.id,passphrase:password}));assert.equal(recovery.activated,false);assert.equal(fs.readFileSync(root+'/scratch/secrets/fixture-private-key.txt','utf8'),'PRIVATE-MARKER-FOR-ENCRYPTION-TEST');
+ const ticket=await call('/api/central/backups/download-ticket',{id:backup.id}),cookie=ticket.headers.get('set-cookie')!.split(';')[0],download=await ticket.json() as any;
+ assert.ok(ticket.headers.get('set-cookie')!.includes('HttpOnly'));const streamed=await fetch(base+download.url,{headers:{Cookie:cookie}});assert.equal(streamed.status,200);const exported=Buffer.from(await streamed.arrayBuffer());assert.ok(exported.subarray(0,16).equals(Buffer.from('AMU-ENCRYPTED-2\n')));assert.equal((await fetch(base+download.url,{headers:{Cookie:cookie}})).status,401);
+ const imported=await fetch(base+'/api/central/backups/import',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/octet-stream'},body:exported});assert.equal(imported.status,200);const importedMetadata=await imported.json() as any;assert.equal(importedMetadata.integrityVerified,false);assert.equal((await call('/api/central/backups/download-ticket',{id:importedMetadata.id})).status,409);assert.equal((await jobResult(await json('/api/central/backups/verify',{id:importedMetadata.id,passphrase:password}))).authenticated,true);
+ checks.push('unique client names, bounded HTTP concurrency, consolidated dashboard, admin separation, maintenance backup, verified isolated restore, one-time streaming download, encrypted import and re-verification');
+ assert.equal((await call('/api/central/network',{bindHost:'0.0.0.0',allowedCidrs:[],certificate:'',privateKey:'',allowRemoteAdmin:false})).status,400);
+ fs.mkdirSync(root+'/scratch/secrets/tls',{recursive:true});const cert=fs.readFileSync('scratch/secrets/tls/server-cert.pem','utf8'),privateKey=fs.readFileSync('scratch/secrets/tls/server-key.pem','utf8');
+ const importedCertificate=await json('/api/central/network/certificates',{certificate:cert,privateKey});assert.equal(importedCertificate.activated,false);assert.ok(!JSON.stringify(importedCertificate).includes(privateKey));
+ await json('/api/central/network',{bindHost:'0.0.0.0',allowedCidrs:['192.168.2.0/24'],certificate:importedCertificate.certificate,privateKey:importedCertificate.privateKey,allowRemoteAdmin:false});const network=await json('/api/central/network');assert.equal(network.active.bindHost,'127.0.0.1');assert.equal(network.saved.bindHost,'0.0.0.0');assert.equal(network.firewallModified,false);assert.equal(network.certificateTrustModified,false);
+ checks.push('LAN profile fails closed, matching certificate/key import, saved network remains inactive until restart, no firewall/trust modifications');
+ const evidence={passed:true,time:new Date().toISOString(),checks};fs.writeFileSync(root+'/verification.json',JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));
+}finally{api.closeAllConnections();await new Promise<void>(r=>api.close(()=>r()));await amuInference.close();}

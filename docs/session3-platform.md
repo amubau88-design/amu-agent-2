@@ -1,5 +1,7 @@
 # AMU Multi-Client-Plattform – Sitzung 3
 
+Historischer Stand. Ab Version 1.4.0 wurden Worker-Pool und Sicherungsverfahren erweitert; neue Exporte sind ausschließlich verschlüsselt. Aktueller Ablauf: [Sitzung 4](session4-platform.md).
+
 Stand: 23.10.2026, Version 1.3.0. Ausschließlich AMU-Agent-2 wurde geändert. Grundlage war der saubere Commit `0c17b87`.
 
 ## Tatsächlich implementiert

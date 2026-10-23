@@ -24,4 +24,6 @@ API-Verwaltung, Queue, Client-Rechte, Entwicklungssteuerung, Dateischutz und Üb
 
 Historischer Stand nach Entwicklungssitzung 2: [session2-engine.md](docs/session2-engine.md). Windows-Anmeldeautostart, Checkpoints/Wiederaufnahme, Rollen, RAM-Schutz und TLS-Vorbereitung sind ergänzt. Der tatsächlich laufende Server bleibt standardmäßig auf Loopback beschränkt.
 
-Aktueller Stand: **1.3.0 – zentrale Multi-Client-Plattform**. Beliebige Anwendungen, API-Freigaben, dauerhafte Nutzung und Tagesbudgets, faire Warteschlangen, Readiness und portable Ressourcenprofile. Betriebsstatus, Grenzen, Sicherungen und nächste Schritte: [Sitzung 3](docs/session3-platform.md). Gezielte Tests: `npm run test:session3`.
+Historischer Stand: **1.3.0 – zentrale Multi-Client-Plattform**. Beliebige Anwendungen, API-Freigaben, dauerhafte Nutzung und Tagesbudgets, faire Warteschlangen, Readiness und portable Ressourcenprofile. Betriebsstatus, Grenzen, Sicherungen und nächste Schritte: [Sitzung 3](docs/session3-platform.md). Gezielte Tests: `npm run test:session3`.
+
+Aktueller Stand: **1.4.0 – native Multi-Worker und verschlüsselte Sicherung/Restore**. Dynamische Worker mit gemeinsamen CPU-/RAM-Grenzen, fairer Dispatch, Wiederherstellung ausgefallener Worker, verschlüsselte Exporte und isolierte Restore-Prüfkopien sowie persistente Netzwerk-/TLS-Verwaltung. [Sitzung 4 und Grenzen](docs/session4-platform.md), [Zwei-Rechner-Anleitung](docs/network-two-computers.md). Gezielte Tests: `npm run test:session4`. Neue Exporte sind ausschließlich verschlüsselt.

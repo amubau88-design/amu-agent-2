@@ -1,3 +1,6 @@
+import {platform} from '../central/platform.ts';
+import {enterRequest,maintenanceStatus} from '../central/maintenance.ts';
+import {setBackupIdleCheck} from '../backup/manager.ts';
 import { observeRequest } from '../central/usage.ts';
 import http from 'node:http';
 import https from 'node:https';
@@ -15,6 +18,7 @@ import { amuInference } from '../inference/engine.ts';
 
 export function createAmuApiServer(): http.Server {
   validateNetworkConfiguration();
+  setBackupIdleCheck(()=>!amuCore.isBusy()&&!amuInference.status().active&&!amuInference.status().queued);
   const handler: http.RequestListener = async (req, res) => {
     const requestId = crypto.randomUUID();
     res.setHeader('X-Request-ID', requestId);
@@ -32,11 +36,13 @@ export function createAmuApiServer(): http.Server {
       if(req.method==='GET'&&['/ready','/readyz','/v1/ready'].includes(pathname)){const state=await health();res.statusCode=state.inferenceReady?200:503;res.end(JSON.stringify(state));return;}
       if (req.method === 'GET' && pathname === '/health') { res.end(JSON.stringify(await health())); return; }
       const client = authenticate(req);
-      const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);};res.once('finish',observe);res.once('close',observe);
+      const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;if(!maintenanceStatus().operation&&!pathname.startsWith('/api/central/backups'))observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);};res.once('finish',observe);res.once('close',observe);
       checkNetworkAccess(req.socket.remoteAddress || '', client.admin);
+      const maintenanceRead=!!maintenanceStatus().operation&&req.method==='GET'&&['/api/client/status','/api/central/dashboard'].includes(pathname);
+      if(!pathname.startsWith('/api/central/backups')&&!maintenanceRead){const leave=enterRequest();res.once('finish',leave);res.once('close',leave);}
       if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status') requireAdmin(client);
       let body: any = null;
-      if (['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
+      if (pathname!=='/api/central/backups/import'&&['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
         const chunks: Buffer[] = []; let size = 0;
         for await (const chunk of req) {
           size += chunk.length;
@@ -70,16 +76,19 @@ export function createAmuApiServer(): http.Server {
       res.writeHead(result.statusCode); res.end(JSON.stringify(result.response));
     } catch (error) {
       if (res.destroyed) return;
+      if(res.headersSent&&String(res.getHeader('Content-Type')).split(';')[0]!=='text/event-stream'){res.destroy();return;}
       if (res.headersSent) { res.end('data: {"error":{"message":"Inference stream interrupted","type":"server_error"}}\n\ndata: [DONE]\n\n'); return; }
       const status = error instanceof ApiError || error instanceof EngineError ? error.status : (error as Error).name === 'TimeoutError' ? 504 : 503;
-      recordSystemEvent('request_error', { requestId, status, category: (error as Error).name });
+      if(!maintenanceStatus().operation)recordSystemEvent('request_error', { requestId, status, category: (error as Error).name });
+      if(status===429||status===503)res.setHeader('Retry-After',status===429?'1':'5');
       res.writeHead(status);
       res.end(JSON.stringify({ error: { message: error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status), reason: ({400:'invalid_request',401:'authentication_failed',403:'permission_denied',404:'not_found',409:'state_conflict',429:'resource_limit',499:'cancelled',503:'service_unavailable',504:'deadline_exceeded',507:'insufficient_memory'} as Record<number,string>)[status]||'request_failed' }, requestId }));
     }
   };
   const tls = tlsOptions();
   const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
-  server.requestTimeout = 15000;
+  server.maxConnections=platform.maxHttpRequests*4;
+  server.requestTimeout = 120000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;
   return server;

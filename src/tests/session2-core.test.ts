@@ -20,7 +20,7 @@ const server=createAmuApiServer();await new Promise<void>(r=>server.listen(0,'12
 const base=`http://127.0.0.1:${(server.address() as any).port}`;
 const admin=fs.readFileSync(state+'/access/central-admin-key.txt','utf8').trim();
 async function call(endpoint:string,body?:any,key=admin){return fetch(base+endpoint,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});}
-async function client(role:string){const response=await call('/api/central/clients',{name:'test-'+role,role});assert.equal(response.status,200);return await response.json() as any;}
+async function client(role:string){const response=await call('/api/central/clients',{name:'test-'+role+'-'+crypto.randomUUID(),role});assert.equal(response.status,200);return await response.json() as any;}
 async function until(check:()=>Promise<boolean>){for(let i=0;i<100;i++){if(await check())return;await new Promise(r=>setTimeout(r,10));}throw Error('Test state deadline');}
 const id=crypto.randomUUID(),workspace='scratch/core/workspaces/'+id,file=workspace+'/source.ts',critical='src/core/session2-review-'+id+'.ts';
 fs.mkdirSync(workspace,{recursive:true});fs.writeFileSync(file,'export const source = 1;\n');fs.writeFileSync(critical,'export const source = 1;\n');
