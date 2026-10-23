@@ -3,9 +3,11 @@ import { initializeCentral } from './central/service.ts';
 import { amuInference } from './inference/engine.ts';
 import { recordSystemEvent, monitoringStatus, stopMonitoring } from './core/monitoring.ts';
 import fs from 'node:fs';
+import { recoverInterruptedTasks } from './core/controller.ts';
 
 const port = Number(process.env.PORT) || 3030;
-const server = await startServer(port);
+const server = await startServer(port).catch(error => { if(process.connected)process.send?.({type:'startup_error',code:error.code||'STARTUP_FAILED'});throw error; });
+recoverInterruptedTasks();
 const pidFile = process.env.AMU_PID_FILE || 'scratch/central-server.pid';
 fs.writeFileSync(pidFile, String(process.pid));
 recordSystemEvent('server_started', { port, pid: process.pid });
@@ -26,5 +28,6 @@ async function shutdown(code: number) {
 process.on('SIGINT', () => { void shutdown(0); });
 process.on('SIGTERM', () => { void shutdown(0); });
 if (process.env.AMU_SUPERVISED === 'true') process.on('disconnect', () => { void shutdown(0); });
+if (process.env.AMU_SUPERVISED === 'true') process.on('message', (message:any) => { if(message?.type==='shutdown')void shutdown(0); });
 process.on('uncaughtException', error => { recordSystemEvent('uncaught_error', { category: error.name }); void shutdown(1); });
 process.on('unhandledRejection', error => { recordSystemEvent('unhandled_error', { category: error instanceof Error ? error.name : 'unknown' }); void shutdown(1); });

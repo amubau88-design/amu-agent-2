@@ -9,7 +9,7 @@ export function listLocalModels(): ModelEntry[] {
   if (!fs.existsSync(registryFile)) return [];
   const entries: unknown = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
   if (!Array.isArray(entries)) throw new Error('Invalid AMU model registry');
-  return entries.filter((m): m is ModelEntry => !!m && typeof m.id === 'string' && typeof m.filename === 'string' && path.basename(m.filename) === m.filename && m.filename.endsWith('.gguf') && /^[a-f0-9]{64}$/.test(m.sha256) && fs.existsSync(path.join(modelDirectory, m.filename)));
+  return entries.filter((m): m is ModelEntry => !!m && typeof m.id === 'string' && typeof m.filename === 'string' && !m.filename.includes(':') && path.basename(m.filename) === m.filename && m.filename.endsWith('.gguf') && Number.isSafeInteger(m.bytes) && m.bytes > 0 && /^[a-f0-9]{64}$/.test(m.sha256) && fs.existsSync(path.join(modelDirectory, m.filename)));
 }
 export function modelPath(id: string): string {
   const entry = listLocalModels().find(m => m.id === id);

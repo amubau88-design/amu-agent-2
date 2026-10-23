@@ -23,3 +23,4 @@ export function monitoringStatus() {
   return { pid: process.pid, uptimeSeconds: process.uptime(), memory: process.memoryUsage(), cpuPercent: Math.round(cpuPercent * 10) / 10, eventLoopDelayMs: { mean: Number.isFinite(delay.mean) ? delay.mean / 1e6 : 0, max: delay.max / 1e6 }, errorCount: errors, rejectedRequests };
 }
 export function stopMonitoring() { delay.disable(); }
+export function readSystemEvents() { const file=path.join(directory,'system.ndjson');if(!fs.existsSync(file))return[];return fs.readFileSync(file,'utf8').trim().split('\n').slice(-100).flatMap(line=>{try{return[JSON.parse(line)];}catch{return[];}}); }

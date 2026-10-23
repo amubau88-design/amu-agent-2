@@ -18,19 +18,16 @@ export class ChatAMUProviderAdapter {
   }
 
   public async getHealth(): Promise<{ healthy: boolean; version: string }> {
-    const res = await this.request<APIResponse<{ status: string; version: string }>>('/api/v1/health', 'GET');
-    return {
-      healthy: res.data?.status === 'healthy',
-      version: res.data?.version || 'unknown',
-    };
+    const status = await this.request<{ inferenceReady: boolean; version?: string }>('/health', 'GET');
+    return { healthy: status.inferenceReady, version: status.version || 'unknown' };
   }
 
   public async getStatus(): Promise<RuntimeStatus> {
-    const res = await this.request<APIResponse<RuntimeStatus>>('/api/v1/runtime/status', 'GET');
-    if (!res.success || !res.data) {
-      throw new Error(res.error?.message || 'Failed to fetch runtime status');
-    }
-    return res.data;
+    const [client, health] = await Promise.all([
+      this.request<{ server: { model: string; backend: string; uptimeSeconds: number } }>('/api/client/status', 'GET'),
+      this.request<{ inferenceReady: boolean; active: number; engine?: { active: number } }>('/health', 'GET'),
+    ]);
+    return { activeBackend: client.server.backend, model: client.server.model, healthy: health.inferenceReady, lanWorkers: 1, activeTasks: health.engine?.active ?? health.active, uptimeSeconds: Math.floor(client.server.uptimeSeconds) };
   }
 
   public async generateChat(prompt: string, options?: Record<string, unknown>): Promise<TaskResult> {

@@ -1,3 +1,5 @@
+import {windowsTaskStatus} from './windows-status.ts';
+import { lanPreparation } from './lan-preparation.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,11 +9,16 @@ import { amuInference } from '../inference/engine.ts';
 import { listLocalModels, EngineError } from '../inference/models.ts';
 import { monitoringStatus } from '../core/monitoring.ts';
 import { networkStatus } from './network.ts';
+import { assessModel, modelRegistrySummary } from '../inference/resources.ts';
+import { requireRole, roleOf, type ClientRole } from './permissions.ts';
+import { readSystemEvents } from '../core/monitoring.ts';
+import { operatingStatus } from './operations.ts';
 
+const version=JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).version;
 const directory = path.resolve(process.env.AMU_CENTRAL_STATE_DIR || 'scratch/secrets');
 fs.mkdirSync(directory, { recursive: true });
 const file = path.join(directory, 'central-access.json');
-export type Client = { id: string; name: string; hash: string; admin: boolean; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number };
+export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number };
 type Config = { provider?: 'embedded' | 'local-http'; upstream: string; model: string; clients: Client[] };
 const hash = (key: string) => crypto.createHash('sha256').update(key).digest('hex');
 let config: Config;
@@ -28,6 +35,7 @@ function save() {
 }
 export class ApiError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 const counters = new Map<string, { minute: number; count: number }>();
+const clientObservations = new Map<string, { lastSeenAt: string; remoteAddress: string }>();
 export function authenticate(req: http.IncomingMessage): Client {
   const authorization = req.headers.authorization;
   const key = authorization?.startsWith('Bearer ') ? authorization.slice(7) : req.headers['x-amu-api-key'];
@@ -35,6 +43,7 @@ export function authenticate(req: http.IncomingMessage): Client {
   const digest = hash(key);
   const client = config.clients.find(c => c.enabled && c.hash.length === digest.length && crypto.timingSafeEqual(Buffer.from(c.hash), Buffer.from(digest)));
   if (!client) throw new ApiError(401, 'Invalid API key');
+  clientObservations.set(client.id, { lastSeenAt: new Date().toISOString(), remoteAddress: req.socket.remoteAddress || 'unknown' });
   const minute = Math.floor(Date.now() / 60000);
   const count = counters.get(client.id);
   if (!count || count.minute !== minute) counters.set(client.id, { minute, count: 1 });
@@ -60,6 +69,8 @@ function release() { const next = queue.shift(); if (next) next(); else active--
 const events: object[] = [];
 const clientActive = new Map<string, number>();
 const clientControllers = new Map<string, Set<AbortController>>();
+const requestControllers = new Map<string, AbortController>();
+const requests = new Map<string, { id:string; clientId:string; streaming:boolean; state:string; since:string }>();
 function record(event: object) {
   const entry = { time: new Date().toISOString(), ...event };
   events.push(entry); if (events.length > 200) events.shift();
@@ -83,24 +94,34 @@ export async function initializeCentral() {
   }
 }
 export async function health() {
-  if ((config.provider || 'embedded') === 'embedded') { const engine = amuInference.status(); return { status: engine.ready ? 'ready' : 'degraded', inferenceReady: engine.ready, active, queued: queue.length, engine }; }
+  if ((config.provider || 'embedded') === 'embedded') { const engine = amuInference.status(); return { server:'AMU-Agent-2',version,uptimeSeconds:process.uptime(),status: engine.ready ? 'ready' : 'degraded', inferenceReady: engine.ready, active, queued: queue.length, engine:{backend:engine.backend,state:engine.state,ready:engine.ready,paused:engine.paused,model:engine.model,active:engine.active,queued:engine.queued} }; }
   try { const r = await upstream('/models'); return { status: r.ok ? 'ready' : 'degraded', inferenceReady: r.ok, active, queued: queue.length }; }
   catch { return { status: 'degraded', inferenceReady: false, active, queued: queue.length }; }
 }
 export async function centralRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, body: any, client: Client): Promise<boolean> {
+  if (pathname === '/api/client/status' && req.method === 'GET') { res.end(JSON.stringify({ id: client.id, name: client.name, server:{version,model:config.model,backend:config.provider==='local-http'?'local-http':amuInference.status().backend,uptimeSeconds:process.uptime()}, role: roleOf(client), enabled: client.enabled, models: client.models, limits: { rpm: client.rpm, maxTokens: client.maxTokens || (client.admin ? 2048 : 512), maxConcurrent: client.maxConcurrent || (client.admin ? 2 : 1) }, active: clientActive.get(client.id) || 0, requestsThisMinute: counters.get(client.id)?.minute === Math.floor(Date.now()/60000) ? counters.get(client.id)?.count : 0, observation: clientObservations.get(client.id), inferenceReady: (await health()).inferenceReady })); return true; }
   if (pathname.startsWith('/api/central/')) {
-    requireAdmin(client);
-    if (pathname === '/api/central/monitoring' && req.method === 'GET') { res.end(JSON.stringify({ process: monitoringStatus(), engine: amuInference.status(), network: networkStatus() })); return true; }
+    const operational = ['/api/central/monitoring','/api/central/status','/api/central/models','/api/central/engine/control','/api/central/requests/cancel','/api/central/logs','/api/central/windows/status'];
+    if (operational.includes(pathname)) requireRole(client,['admin','operator']); else requireAdmin(client);
+    if(pathname==='/api/central/windows/status'&&req.method==='GET'){res.end(JSON.stringify(await windowsTaskStatus()));return true;}
+    if (pathname === '/api/central/logs' && req.method === 'GET') { res.end(JSON.stringify({ events: readSystemEvents() })); return true; }
+    if (pathname === '/api/central/models' && req.method === 'GET') { const reclaimable=(amuInference.status().nativeProcess as any)?.memory?.rss || 0; const models=await Promise.all(modelRegistrySummary().map(async m => { try { return {...m, assessment:await assessModel(m.id,reclaimable)}; } catch(e) { return {...m,error:(e as Error).message}; } })); res.end(JSON.stringify({ models, active: amuInference.status().model })); return true; }
+    if (pathname === '/api/central/engine/control' && req.method === 'POST') { if(body?.action==='start') await amuInference.start(); else if(body?.action==='stop') await amuInference.pause(); else if(body?.action==='restart') await amuInference.restart(); else throw new ApiError(400,'Unknown engine action'); record({action:'engine_control',operation:body.action,client:client.id});res.end(JSON.stringify(amuInference.status()));return true; }
+    if (pathname === '/api/central/requests/cancel' && req.method === 'POST') { if(typeof body?.id!=='string')throw new ApiError(400,'Request id required');const controller=requestControllers.get(body.id);if(controller)controller.abort(new ApiError(499,'Request cancelled by operator'));else amuInference.cancel(body.id);record({action:'request_cancelled',id:body.id,client:client.id});res.end('{"ok":true}');return true; }
+    if (pathname === '/api/central/server/restart' && req.method === 'POST') { if (!process.connected || process.env.AMU_SUPERVISED !== 'true') throw new ApiError(409,'API restart requires the AMU supervisor');res.writeHead(202);res.end('{"accepted":true,"operation":"restart"}');setTimeout(()=>process.send?.({type:'control',action:'restart'}),200).unref();return true; }
+    if (pathname === '/api/central/integration' && req.method === 'GET') {const network=networkStatus();res.end(JSON.stringify({server:'AMU-Agent-2',network,lanPreparation:lanPreparation(),twoComputerTest:'not performed',readyForLan:network.tls&&network.allowedCidrs.length>0&&!['127.0.0.1','localhost','::1'].includes(network.bindHost),configuration:{base_url:network.tls?'https://<Agent-2-host>:3030/v1':'http://127.0.0.1:3030/v1',model:config.model,api_key:'<dedicated client key>'}}));return true;}
+    if (pathname === '/api/central/monitoring' && req.method === 'GET') { res.end(JSON.stringify({ process: monitoringStatus(), engine: amuInference.status(), network: networkStatus(), operation:operatingStatus() })); return true; }
     if (pathname === '/api/central/status' && req.method === 'GET') {
-      res.end(JSON.stringify({ ...await health(), connection: { provider: config.provider || 'embedded', upstream: config.upstream, model: config.model }, clients: config.clients.map(({ hash: _, ...c }) => c), resources: { memory: process.memoryUsage(), freeMemory: os.freemem(), totalMemory: os.totalmem(), cpus: os.cpus().length, cpuUsage: process.cpuUsage(), uptime: process.uptime() }, events }));
+      res.end(JSON.stringify({ ...await health(), engine:amuInference.status(),requests:[...requests.values()], connection: { provider: config.provider || 'embedded', upstream: config.upstream, model: config.model }, clients: config.clients.map(({ hash: _, ...c }) => ({...c,role:roleOf(c),active:clientActive.get(c.id)||0,observation:clientObservations.get(c.id)||null})), resources: { memory: process.memoryUsage(), freeMemory: os.freemem(), totalMemory: os.totalmem(), cpus: os.cpus().length, cpuUsage: process.cpuUsage(), uptime: process.uptime() }, events }));
     } else if (pathname === '/api/central/clients' && req.method === 'POST') {
       if (typeof body?.name !== 'string' || !body.name.trim() || body.name.length > 100 || (body.models !== undefined && (!Array.isArray(body.models) || body.models.some((m: unknown) => typeof m !== 'string')))) throw new ApiError(400, 'Invalid client');
       if (body.rpm !== undefined && (!Number.isInteger(body.rpm) || body.rpm < 1 || body.rpm > 600)) throw new ApiError(400, 'Invalid rate limit');
       if (body.maxTokens !== undefined && (!Number.isInteger(body.maxTokens) || body.maxTokens < 1 || body.maxTokens > 2048)) throw new ApiError(400, 'Invalid token limit');
       if (body.maxConcurrent !== undefined && (!Number.isInteger(body.maxConcurrent) || body.maxConcurrent < 1 || body.maxConcurrent > 2)) throw new ApiError(400, 'Invalid concurrency limit');
+      if (body.role !== undefined && !['inference','operator','developer'].includes(body.role)) throw new ApiError(400,'Invalid client role');
       if (config.clients.length >= 1000) throw new ApiError(409, 'Client limit reached');
       const key = crypto.randomBytes(32).toString('base64url');
-      const entry: Client = { id: crypto.randomUUID(), name: body.name, hash: hash(key), admin: false, enabled: true, models: body.models || [], rpm: body.rpm || 60, maxTokens: body.maxTokens || 512, maxConcurrent: body.maxConcurrent || 1 };
+      const entry: Client = { id: crypto.randomUUID(), name: body.name, hash: hash(key), admin: false, role: body.role || 'inference', enabled: true, models: body.models || [], rpm: body.rpm || 60, maxTokens: body.maxTokens || 512, maxConcurrent: body.maxConcurrent || 1 };
       config.clients.push(entry); save(); record({ action: 'client_created', id: entry.id });
       res.end(JSON.stringify({ id: entry.id, key }));
     } else if (pathname === '/api/central/revoke' && req.method === 'POST') {
@@ -122,8 +143,9 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
     } else if (pathname === '/api/central/clients/update' && req.method === 'POST') {
       const entry = config.clients.find(c => c.id === body?.id && !c.admin);
       if (!entry) throw new ApiError(404, 'Client not found');
+      if (body.role !== undefined && !['inference','operator','developer'].includes(body.role)) throw new ApiError(400,'Invalid client role');
       if (!Array.isArray(body.models) || body.models.some((m: unknown) => typeof m !== 'string') || !Number.isInteger(body.rpm) || body.rpm < 1 || body.rpm > 600 || !Number.isInteger(body.maxTokens) || body.maxTokens < 1 || body.maxTokens > 2048 || !Number.isInteger(body.maxConcurrent) || body.maxConcurrent < 1 || body.maxConcurrent > 2) throw new ApiError(400, 'Invalid client limits');
-      entry.models = body.models; entry.rpm = body.rpm; entry.maxTokens = body.maxTokens; entry.maxConcurrent = body.maxConcurrent; save(); record({ action: 'client_limits_updated', id: entry.id }); res.end('{"ok":true}');
+      entry.models = body.models; entry.rpm = body.rpm; entry.maxTokens = body.maxTokens; entry.maxConcurrent = body.maxConcurrent; if(body.role)entry.role=body.role; save(); record({ action: 'client_limits_updated', id: entry.id }); res.end('{"ok":true}');
     } else if (pathname === '/api/central/engine/load' && req.method === 'POST') {
       await initializeCentral(); res.end(JSON.stringify(amuInference.status()));
     } else if (pathname === '/api/central/connection' && req.method === 'POST') {
@@ -156,6 +178,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if (typeof model !== 'string' || !model) throw new ApiError(400, 'Specify an installed model');
   if (client.models.length && !client.models.includes(model)) throw new ApiError(403, 'Model access denied');
   if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new ApiError(400, 'stream must be boolean');
+  if(body.stream_options!==undefined&&(!body.stream_options||typeof body.stream_options!=='object'||Array.isArray(body.stream_options)||(body.stream_options.include_usage!==undefined&&typeof body.stream_options.include_usage!=='boolean')))throw new ApiError(400,'Invalid stream_options');
   if (body.temperature !== undefined && (typeof body.temperature !== 'number' || body.temperature < 0 || body.temperature > 2)) throw new ApiError(400, 'Invalid temperature');
   if (body.max_tokens !== undefined && (!Number.isInteger(body.max_tokens) || body.max_tokens < 1 || body.max_tokens > 32768)) throw new ApiError(400, 'Invalid max_tokens');
   if (['tools','tool_choice','functions','response_format'].some(k => body[k] !== undefined)) throw new ApiError(400, 'This endpoint supports text only; use the AMU Core task API for tools');
@@ -163,13 +186,16 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if ((clientActive.get(client.id) || 0) >= (client.maxConcurrent || (client.admin ? 2 : 1))) throw new ApiError(429, 'Client concurrent request limit exceeded');
   clientActive.set(client.id, (clientActive.get(client.id) || 0) + 1);
   const controller = new AbortController();
+  const requestId=String(res.getHeader('X-Request-ID')||crypto.randomUUID());requestControllers.set(requestId,controller);requests.set(requestId,{id:requestId,clientId:client.id,streaming:!!body.stream,state:'waiting-admission',since:new Date().toISOString()});
   const controllers = clientControllers.get(client.id) || new Set<AbortController>(); controllers.add(controller); clientControllers.set(client.id, controllers);
   const timer = setTimeout(() => controller.abort(new DOMException('Inference deadline exceeded', 'TimeoutError')), 120000);
   const disconnect = () => { if (!res.writableEnded) controller.abort(); };
   res.on('close', disconnect);
   let acquired = false;
+  const heartbeat=setInterval(()=>{if(body.stream&&res.headersSent&&!res.writableEnded&&!res.destroyed)res.write(': keep-alive\n\n');},15000);heartbeat.unref();
   try {
     await acquire(controller.signal); acquired = true;
+    const request=requests.get(requestId);if(request)request.state='inference-submitted';
     if (!client.enabled) throw new ApiError(401, 'Client access revoked');
     if ((config.provider || 'embedded') === 'embedded') {
       const id = 'chatcmpl-' + crypto.randomUUID(); const created = Math.floor(Date.now() / 1000);
@@ -179,8 +205,8 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
         if (res.writableLength > 1048576) controller.abort(new EngineError(429, 'Streaming consumer is too slow'));
       };
       let first = true;
-      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256, temperature: body.temperature, signal: controller.signal, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
-      if (body.stream) { chunk({}, result.finishReason); res.end('data: [DONE]\n\n'); }
+      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256, temperature: body.temperature, signal: controller.signal, clientId:client.id, stream:!!body.stream, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
+      if (body.stream) { chunk({}, result.finishReason); if(body.stream_options?.include_usage===true)res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created,model,choices:[],usage:{...result.usage,total_tokens:result.usage.prompt_tokens+result.usage.completion_tokens}})+'\n\n');res.end('data: [DONE]\n\n'); }
       else res.end(JSON.stringify({ id, object: 'chat.completion', created, model, choices: [{ index: 0, message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }], usage: { ...result.usage, total_tokens: result.usage.prompt_tokens + result.usage.completion_tokens } }));
       record({ action: 'completion', backend: 'embedded', client: client.id, model, stream: !!body.stream, durationMs: result.durationMs, ttftMs: result.ttftMs });
       return true;
@@ -196,6 +222,6 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
       await pipeline(Readable.fromWeb(response.body as any), res, { signal: controller.signal });
     } else res.end(JSON.stringify(await response.json()));
     record({ action: 'completion', client: client.id, model, stream: !!body.stream });
-  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
+  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { clearInterval(heartbeat);requestControllers.delete(requestId);requests.delete(requestId);controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
   return true;
 }

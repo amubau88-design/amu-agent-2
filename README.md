@@ -21,3 +21,5 @@ Node.js 24 oder neuer. Abhängigkeiten sind durch `package-lock.json` gesperrt. 
 Gewichte und private Daten gehören nicht in Git. Für eine andere Installation muss eine zugelassene GGUF-Datei einmalig mit SHA-256-Prüfung importiert werden. Beispiel und Betriebsdetails: [docs/amu-engine.md](docs/amu-engine.md).
 
 API-Verwaltung, Queue, Client-Rechte, Entwicklungssteuerung, Dateischutz und Überwachung sind AMU-Software. Die mathematische Modellausführung verwendet `node-llama-cpp`/`llama.cpp`; die derzeitigen Modellgewichte sind Qwen2.5-1.5B unter Apache-2.0. Das Projekt ist kein neu trainiertes KI-Grundmodell.
+
+Aktueller Stand nach Entwicklungssitzung 2: [session2-engine.md](docs/session2-engine.md). Windows-Anmeldeautostart, Checkpoints/Wiederaufnahme, Rollen, RAM-Schutz und TLS-Vorbereitung sind ergänzt. Der tatsächlich laufende Server bleibt standardmäßig auf Loopback beschränkt.

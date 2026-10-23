@@ -13,8 +13,12 @@ const model = await llama.loadModel({ modelPath: workerData.modelPath, gpuLayers
 const context = await model.createContext({ contextSize: workerData.contextSize, sequences: 1, threads: workerData.threads, batchSize: 256 });
 port.postMessage({ type: 'ready', gpu: llama.gpu, contextSize: context.contextSize });
 setInterval(() => port.postMessage({ type: 'metrics' }), 5000).unref();
+let activeGeneration: {id:string;controller:AbortController} | null = null;
 port.on('message', async (job) => {
+  if(job.type==='cancel'){if(activeGeneration&&activeGeneration.id===job.id)activeGeneration.controller.abort(Object.assign(new Error('Generation cancelled'),{status:499}));return;}
   if (job.type !== 'generate') return;
+  if(activeGeneration){port.postMessage({type:'failure',id:job.id,status:409,message:'Native sequence is busy'});return;}
+  const controller=new AbortController();activeGeneration={id:job.id,controller};
   const sequence = context.getSequence();
   const session = new LlamaChatSession({ contextSequence: sequence });
   const started = Date.now();
@@ -29,6 +33,7 @@ port.on('message', async (job) => {
     const before = sequence.tokenMeter.getState();
     const content = await session.prompt(messages.at(-1).content, {
       maxTokens: job.maxTokens, temperature: job.temperature,
+      signal: controller.signal,
       grammar: job.responseSchema ? await llama.createGrammarForJsonSchema(job.responseSchema) : undefined,
       onTextChunk(text) {
         if (!firstTokenMs) firstTokenMs = Date.now() - started;
@@ -40,6 +45,6 @@ port.on('message', async (job) => {
     response = { type: 'result', id: job.id, content, usage, finishReason: usage.completion_tokens >= job.maxTokens ? 'length' : 'stop', ttftMs: firstTokenMs, durationMs: Date.now() - started };
   } catch (error) {
     response = { type: 'failure', id: job.id, message: (error as Error).message, status: (error as any).status || 503 };
-  } finally { session.dispose(); await sequence.dispose(); }
+  } finally { session.dispose(); await sequence.dispose(); activeGeneration=null; }
   port.postMessage(response!);
 });

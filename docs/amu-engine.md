@@ -1,3 +1,5 @@
+> Aktuelle Ergänzungen und geänderte Betriebsdetails: [Entwicklungssitzung 2](session2-engine.md).
+
 # Eigenständige AMU AI Engine — Betriebs- und Entwicklungsstand
 
 Stand: 23.10.2026, Europe/Berlin. Diese Beschreibung ersetzt für den aktuellen Betrieb die frühere Ollama-basierte Beschreibung in `central-server.md`.

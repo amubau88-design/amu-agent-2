@@ -9,6 +9,8 @@ import { EngineError } from '../inference/models.ts';
 import { amuCore } from '../core/controller.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { bindHost, tlsOptions, validateNetworkConfiguration, checkNetworkAccess } from '../central/network.ts';
+import { requireRole } from '../central/permissions.ts';
+import { amuInference } from '../inference/engine.ts';
 
 export function createAmuApiServer(): http.Server {
   validateNetworkConfiguration();
@@ -29,7 +31,7 @@ export function createAmuApiServer(): http.Server {
       if (req.method === 'GET' && pathname === '/health') { res.end(JSON.stringify(await health())); return; }
       const client = authenticate(req);
       checkNetworkAccess(req.socket.remoteAddress || '', client.admin);
-      if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/')) requireAdmin(client);
+      if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status') requireAdmin(client);
       let body: any = null;
       if (['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
         const chunks: Buffer[] = []; let size = 0;
@@ -41,17 +43,20 @@ export function createAmuApiServer(): http.Server {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
       if (pathname.startsWith('/api/core/')) {
-        requireAdmin(client);
+        requireRole(client,['admin','developer']);
+        if(req.method==='POST'&&(pathname==='/api/core/tasks'||pathname.endsWith('/resume'))&&client.models.length&&!client.models.includes(amuInference.status().model))throw new ApiError(403,'Active model is outside this client model grant');
         const controller = new AbortController();
         const disconnect = () => { if (!res.writableEnded) controller.abort(); };
         res.on('close', disconnect);
         try {
           let result;
-          if (pathname === '/api/core/tasks' && req.method === 'POST') result = await amuCore.create(body, client.id, controller.signal);
-          else if (pathname === '/api/core/tasks' && req.method === 'GET') result = amuCore.list(client.id);
-          else if (/^\/api\/core\/tasks\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.get(pathname.split('/').at(-1)!, client.id);
-          else if (/^\/api\/core\/proposals\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.proposal(pathname.split('/').at(-1)!, client.id);
-          else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/apply$/.test(pathname) && req.method === 'POST') { result = amuCore.apply(pathname.split('/').at(-2)!, client.id); recordSystemEvent('core_change_applied', { proposalId: result.id, clientId: client.id }); }
+          if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
+          else if (pathname === '/api/core/tasks' && req.method === 'GET') result = amuCore.list(client.id,client.admin);
+          else if (/^\/api\/core\/tasks\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.get(pathname.split('/').at(-1)!, client.id,client.admin);
+          else if (/^\/api\/core\/proposals\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.proposal(pathname.split('/').at(-1)!, client.id,client.admin);
+          else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/resume$/.test(pathname) && req.method === 'POST') { if(body?.acceptSourceChanges)requireAdmin(client);result=amuCore.resume(pathname.split('/').at(-2)!,client.id,body,client.admin);res.statusCode=202; }
+          else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/cancel$/.test(pathname) && req.method === 'POST') result=amuCore.cancel(pathname.split('/').at(-2)!,client.id,client.admin);
+          else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/apply$/.test(pathname) && req.method === 'POST') { requireAdmin(client);result = amuCore.apply(pathname.split('/').at(-2)!, client.id,body||{},client.admin); recordSystemEvent('core_change_applied', { proposalId: result.id, clientId: client.id }); }
           else throw new ApiError(404, 'Unknown AMU Core endpoint');
           res.end(JSON.stringify(result)); return;
         } finally { res.off('close', disconnect); }

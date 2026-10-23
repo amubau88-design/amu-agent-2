@@ -60,7 +60,7 @@ try {
   const controller=new AbortController();
   const aborted=amuInference.generate({model:'qwen2.5:1.5b',messages:[{role:'user',content:'Write a very long list of numbers.'}],maxTokens:512,signal:controller.signal,onChunk:()=>controller.abort(new DOMException('Test cancellation','AbortError'))});
   await assert.rejects(aborted);
-  const recovered=await amuInference.generate({model:'qwen2.5:1.5b',messages:[{role:'user',content:'Reply OK'}],maxTokens:4});assert.ok(recovered.content.length>0);assert.ok(amuInference.status().restarts>=1);
+  const recovered=await amuInference.generate({model:'qwen2.5:1.5b',messages:[{role:'user',content:'Reply OK'}],maxTokens:4});assert.ok(recovered.content.length>0);assert.ok(amuInference.status().cancelled>=1);
   evidence.checks.push('running inference cancellation and native worker recovery');
   const taskResponse=await call('/api/core/tasks',{goal:'Repair add: it must return a + b instead of a - b. Use propose_file with the complete corrected TypeScript file. Keep the explanation short.',files:[file]});assert.equal(taskResponse.status,200);const task=await taskResponse.json() as any;
   evidence.coreTask={id:task.id,state:task.state,result:task.result,error:task.error};
