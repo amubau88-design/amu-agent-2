@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -19,7 +19,11 @@
     "windows:status": "powershell -NoProfile -File scripts/windows-autostart.ps1 -Action Status",
     "test:session3": "node --experimental-strip-types src/tests/session3-platform.test.ts && node --experimental-strip-types src/tests/session3-native.test.ts",
     "snapshot:create": "node --experimental-strip-types scripts/encrypted-backup.mjs create",
-    "test:session4": "node --experimental-strip-types src/tests/session4-workers.test.ts && node --experimental-strip-types src/tests/session4-backup.test.ts"
+    "test:session4": "node --experimental-strip-types src/tests/session4-workers.test.ts && node --experimental-strip-types src/tests/session4-backup.test.ts",
+    "worker:init": "node --experimental-strip-types scripts/remote-worker.mjs init",
+    "worker:start": "node --experimental-strip-types scripts/remote-worker.mjs start",
+    "test:session5": "node --experimental-strip-types src/tests/session5-remote.test.ts && node --experimental-strip-types src/tests/session5-failure.test.ts && node --experimental-strip-types src/tests/session5-management.test.ts && node --experimental-strip-types src/tests/session5-supervisor.test.ts",
+    "client:test": "node scripts/test-client-connection.mjs"
   },
   "keywords": [],
   "author": "AMU Team",

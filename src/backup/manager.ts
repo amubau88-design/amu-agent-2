@@ -10,12 +10,14 @@ import {EngineError} from '../inference/models.ts';
 const root=path.resolve(process.env.AMU_BACKUP_PROJECT_ROOT||'.');
 export const backupDirectory=path.join(root,'scratch/backups/encrypted');
 const restoreDirectory=path.join(root,'scratch/restores');
+const applicationVersion=JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).version as string;
+export function backupCompatibility(manifest:any){if(!manifest)return {compatible:null,reason:'Legacy archive without version manifest; manual review required'};const compatible=manifest.schemaVersion===1&&typeof manifest.applicationVersion==='string'&&manifest.applicationVersion.split('.')[0]===applicationVersion.split('.')[0];return {compatible,sourceVersion:manifest.applicationVersion,currentVersion:applicationVersion,schemaVersion:manifest.schemaVersion,reason:compatible?'Compatible archive schema; inspect restored configuration before activation':'Archive schema or application major version differs; automatic activation is forbidden'};}
 fs.mkdirSync(backupDirectory,{recursive:true});fs.mkdirSync(restoreDirectory,{recursive:true});
 type Job={id:string;kind:'backup'|'restore'|'verify';state:'running'|'completed'|'failed'|'interrupted';createdAt:string;finishedAt?:string;result?:unknown;error?:string};
 const journal=path.join(backupDirectory,'operations.json');
 let jobs:Job[]=fs.existsSync(journal)?JSON.parse(fs.readFileSync(journal,'utf8')):[];
 for(const job of jobs)if(job.state==='running'){job.state='interrupted';job.error='Process ended; operation was not replayed';}
-function persist(){writePrivateJson(journal,jobs.slice(-100));}
+function persist(){writePrivateJson(journal,jobs.slice(-100),true);}
 let busy=false;let canSnapshot=()=>true;
 export function setBackupIdleCheck(check:()=>boolean){canSnapshot=check;}
 function password(value?:unknown){if(value!==undefined){if(typeof value!=='string'||value.length<12||value.length>1024)throw new EngineError(400,'Use a passphrase of 12–1024 characters');return value;}
@@ -34,19 +36,20 @@ function includes(full:boolean,models:boolean){
 export function startBackup(body:any={}){if(body.scope!==undefined&&!['configuration','full'].includes(body.scope))throw new EngineError(400,'Invalid backup scope');if(body.includeModels!==undefined&&typeof body.includeModels!=='boolean')throw new EngineError(400,'Invalid model backup option');const passphrase=password(body.passphrase),full=body.scope!=='configuration',models=body.includeModels!==false&&full;
  return launch('backup',id=>exclusiveMaintenance('encrypted backup',async()=>{
   if(!canSnapshot())throw new EngineError(409,'Stop active inference and development tasks before backup');
-  const file=path.join(backupDirectory,id+'.amubak');const result=await createArchive(root,file,passphrase,includes(full,models),['scratch/secrets/backup-recovery-key.txt']);
-  const metadata={id,createdAt:new Date().toISOString(),scope:full?'full':'configuration',includesModels:models,encrypted:true,cipher:'AES-256-GCM',keySource:body.passphrase?'user-passphrase':'local-recovery-key',...result};writePrivateJson(file+'.json',metadata);return metadata;
+  const file=path.join(backupDirectory,id+'.amubak');const result=await createArchive(root,file,passphrase,includes(full,models),['scratch/secrets/backup-recovery-key.txt'],{schemaVersion:1,applicationVersion,createdAt:new Date().toISOString(),scope:full?'full':'configuration',minimumNodeMajor:24});
+  const metadata={id,createdAt:new Date().toISOString(),scope:full?'full':'configuration',includesModels:models,encrypted:true,cipher:'AES-256-GCM',keySource:body.passphrase?'user-passphrase':'local-recovery-key',...result};writePrivateJson(file+'.json',metadata,true);return metadata;
  }));}
 export function startRestore(body:any,verifyOnly=false){const file=backupFile(body?.id),passphrase=password(body?.passphrase);
  return launch(verifyOnly?'verify':'restore',async id=>{
   const temporary=path.join(restoreDirectory,id+'.partial');if(!inside(restoreDirectory,temporary))throw new EngineError(403,'Unsafe restore target');
   const result=await extractArchive(file,temporary,passphrase);const metadata=JSON.parse(fs.readFileSync(file+'.json','utf8'));writePrivateJson(file+'.json',{...metadata,encrypted:true,integrityVerified:true,lastVerifiedAt:new Date().toISOString()});
-  if(verifyOnly){await fs.promises.rm(temporary,{recursive:true});return {...result,backupId:body.id,verified:true};}
+  const manifestFile=path.join(temporary,'.amu-backup-manifest.json'),compatibility=backupCompatibility(fs.existsSync(manifestFile)?JSON.parse(fs.readFileSync(manifestFile,'utf8')):null);
+  if(verifyOnly){await fs.promises.rm(temporary,{recursive:true});return {...result,backupId:body.id,verified:true,compatibility};}
   // Keep all current state untouched. A restored task cannot inherit a live PID on the new host.
   const core=path.join(temporary,'scratch/core');if(fs.existsSync(core))for(const name of fs.readdirSync(core).filter(n=>n.endsWith('.task.json'))){const taskFile=path.join(core,name),task=JSON.parse(fs.readFileSync(taskFile,'utf8'));delete task.ownerPid;writePrivateJson(taskFile,task);}
   const ignoreFile=path.join(temporary,'.gitignore');if(!fs.existsSync(ignoreFile))fs.writeFileSync(ignoreFile,'scratch/\nnode_modules/\n.env\n.env.*\n',{flag:'wx',mode:0o600});
   const destination=path.join(restoreDirectory,id);if(fs.existsSync(destination))throw new EngineError(409,'Restore destination exists');await fs.promises.rename(temporary,destination);
-  return {...result,backupId:body.id,directory:path.relative(root,destination),activated:false,message:'Verified recovery copy; current installation was not overwritten'};
+  return {...result,backupId:body.id,directory:path.relative(root,destination),activated:false,compatibility,message:'Verified recovery copy; current installation was not overwritten; incompatible archives require migration before activation'};
  });}
 
 export async function importBackup(request:IncomingMessage){

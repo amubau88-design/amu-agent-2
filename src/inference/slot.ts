@@ -8,7 +8,7 @@ import { EngineError, hardware, listLocalModels, modelPath } from './models.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { assessModel, assertMemoryBudget } from './resources.ts';
 export type Message = { role: 'system' | 'user' | 'assistant'; content: string };
-export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number };
+export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number; executionId?:string };
 export type GenerationResult = { content: string; usage: { prompt_tokens: number; completion_tokens: number }; finishReason: 'stop' | 'length'; ttftMs: number; durationMs: number };
 
 type Job = { id: string; input: Generation; resolve: (r: GenerationResult) => void; reject: (e: Error) => void; cleanup: () => void; cancel: (reason?: Error) => void; cancelling?:boolean; cancellationTimer?:NodeJS.Timeout };

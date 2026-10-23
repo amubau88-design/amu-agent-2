@@ -1,5 +1,7 @@
 # AMU AI Engine 1.4.0 – Sitzung 4
 
+Historischer Stand. Aktuelle Ergänzungen und Grenzen: [Sitzung 5](session5-platform.md).
+
 Ausgangsstand: sauberer Commit `5df6a21`. Ausschließlich das bestehende AMU-Agent-2-Projekt wurde weiterentwickelt. Andere AMU-Anwendungen, Firewall-Regeln, Windows-Vertrauensspeicher und globale Sicherheitsrichtlinien wurden nicht verändert.
 
 ## Native Worker und Lastverteilung

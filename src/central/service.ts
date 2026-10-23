@@ -1,6 +1,8 @@
 import {amuCore} from '../core/controller.ts';
 import {loadNetworkProfile,saveNetworkProfile,certificates,importCertificate} from './network-profile.ts';
 import {backupStatus,startBackup,startRestore,backupFile,importBackup} from '../backup/manager.ts';
+import {backupScheduleStatus,configureBackupSchedule} from '../backup/scheduler.ts';
+import {claimRequestIdentity} from './idempotency.ts';
 import {pipeline} from 'node:stream/promises';
 import {maintenanceStatus} from './maintenance.ts';
 import {setGenerationPolicy} from '../inference/policy.ts';
@@ -27,7 +29,7 @@ const version=JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).v
 const directory = path.resolve(process.env.AMU_CENTRAL_STATE_DIR || 'scratch/secrets');
 fs.mkdirSync(directory, { recursive: true });
 const file = path.join(directory, 'central-access.json');
-export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number };
+export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number;archivedAt?:string };
 type Config = { provider?: 'embedded' | 'local-http'; upstream: string; model: string; clients: Client[] };
 const downloadTickets=new Map<string,{clientId:string;hash:string;path:string;expires:number}>();
 const hash = (key: string) => crypto.createHash('sha256').update(key).digest('hex');
@@ -40,7 +42,7 @@ else {
   fs.writeFileSync(path.join(directory, 'central-admin-key.txt'), key, { mode: 0o600, flag: 'wx' });
 }
 function save() {
-  writePrivateJson(file,config);
+  writePrivateJson(file,config,true);
 }
 export class ApiError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 const counters = new Map<string, { minute: number; count: number }>();
@@ -143,9 +145,14 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if (pathname.startsWith('/api/central/')) {
     const operational = ['/api/central/monitoring','/api/central/status','/api/central/models','/api/central/engine/control','/api/central/requests/cancel','/api/central/logs','/api/central/windows/status','/api/central/workers','/api/central/workers/control','/api/central/dashboard'];
     if (operational.includes(pathname)) requireRole(client,['admin','operator']); else requireAdmin(client);
-    if(pathname==='/api/central/dashboard'&&req.method==='GET'){res.end(JSON.stringify({status:await statusPayload(),monitoring:{process:monitoringStatus(),engine:amuInference.status(),network:networkStatus(),operation:operatingStatus()},events:readSystemEvents(),workers:{workers:amuInference.workers(),capacity:amuInference.status().capacity},backups:client.admin?backupStatus():undefined}));return true;}
+    if(pathname==='/api/central/dashboard'&&req.method==='GET'){res.end(JSON.stringify({status:await statusPayload(),monitoring:{process:monitoringStatus(),engine:amuInference.status(),network:networkStatus(),operation:operatingStatus()},events:readSystemEvents(),workers:{workers:amuInference.workers(),capacity:amuInference.status().capacity},backups:client.admin?{...backupStatus(),schedule:backupScheduleStatus()}:undefined}));return true;}
     if(pathname==='/api/central/workers'&&req.method==='GET'){res.end(JSON.stringify({workers:amuInference.workers(),capacity:amuInference.status().capacity}));return true;}
     if(pathname==='/api/central/workers/register'&&req.method==='POST'){res.end(JSON.stringify(await amuInference.register(body)));return true;}
+    if(pathname==='/api/central/workers/remote'&&req.method==='POST'){requireRole(client,['admin']);res.end(JSON.stringify(await amuInference.registerRemote(body)));return true;}
+    if(pathname==='/api/central/workers/remove'&&req.method==='POST'){requireRole(client,['admin']);res.end(JSON.stringify(await amuInference.remove(body?.id)));return true;}
+    if(pathname==='/api/central/clients/connection'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');const network=networkStatus(),lanReady=network.tls&&!['127.0.0.1','::1','localhost'].includes(network.bindHost);res.end(JSON.stringify({application:entry.name,clientId:entry.id,base_url:lanReady?'https://<Agent-2-Zertifikatsname-oder-IP>:3030/v1':'http://127.0.0.1:3030/v1',model:entry.models[0]||config.model,api_key:'<individuellen Schlüssel aus sicherem Speicher einsetzen>',stream:true,max_tokens:entry.maxTokens||512,request_timeout_seconds:platform.requestTimeoutMs/1000,automatic_generation_retries:0,tls:{requiredForRemote:true,verify:true,caFile:'amu-ca.pem',currentlyReadyForRemote:lanReady},status:{enabled:entry.enabled,archived:!!entry.archivedAt,lastSeen:clientObservations.get(entry.id)||null},note:'Loopback ist nur auf Agent-2 erreichbar. Zweiten Computer erst nach TLS-/CIDR-Einrichtung verbinden. Keine Schlüssel in Quellcode speichern.'}));return true;}
+    if(pathname==='/api/central/clients/archive'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');entry.enabled=false;entry.archivedAt=new Date().toISOString();entry.hash=hash(crypto.randomBytes(48).toString('base64url'));save();for(const controller of clientControllers.get(entry.id)||[])controller.abort(new ApiError(401,'Application archived'));for(const job of amuInference.status().requests.filter(j=>j.clientId===entry.id))amuInference.cancel(job.id);record({action:'client_archived',id:entry.id});res.end(JSON.stringify({archived:true,usageRetained:true,id:entry.id}));return true;}
+    if(pathname==='/api/central/clients/restore'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin&&c.archivedAt);if(!entry)throw new ApiError(404,'Archived application not found');const key=crypto.randomBytes(32).toString('base64url');delete entry.archivedAt;entry.enabled=true;entry.hash=hash(key);save();record({action:'client_restored',id:entry.id});res.end(JSON.stringify({id:entry.id,key}));return true;}
     if(pathname==='/api/central/workers/configure'&&req.method==='POST'){if(typeof body?.id!=='string')throw new ApiError(400,'Worker id required');const {id,...settings}=body;const worker=await amuInference.configure(id,settings);if(id==='primary'){config.model=worker.model;save();}res.end(JSON.stringify(worker));return true;}
     if(pathname==='/api/central/workers/control'&&req.method==='POST'){if(typeof body?.id!=='string'||!['start','stop','restart'].includes(body.action))throw new ApiError(400,'Worker id and action required');res.end(JSON.stringify(await amuInference.workerControl(body.id,body.action,body.allowDuplicateModel===true)));return true;}
     if(pathname==='/api/central/network'&&req.method==='GET'){res.end(JSON.stringify({active:networkStatus(),saved:loadNetworkProfile(),certificates:certificates(),restartRequiredForChanges:true,firewallModified:false,certificateTrustModified:false}));return true;}
@@ -154,6 +161,8 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
     if(pathname==='/api/central/backups/import'&&req.method==='POST'){res.end(JSON.stringify(await importBackup(req)));return true;}
     if(pathname==='/api/central/backups/download-ticket'&&req.method==='POST'){const archive=backupFile(body?.id);if(JSON.parse(fs.readFileSync(archive+'.json','utf8')).integrityVerified===false)throw new ApiError(409,'Verify imported backup before exporting it');for(const [key,ticket]of downloadTickets)if(ticket.expires<Date.now())downloadTickets.delete(key);if(downloadTickets.size>=1000)throw new ApiError(429,'Download ticket limit');const token=crypto.randomBytes(32).toString('base64url'),url='/api/central/backups/'+body.id+'/download';downloadTickets.set(token,{clientId:client.id,hash:client.hash,path:url,expires:Date.now()+60000});res.setHeader('Set-Cookie','AMUDownload='+token+'; HttpOnly; SameSite=Strict; Path='+url+'; Max-Age=60'+(networkStatus().tls?'; Secure':''));res.end(JSON.stringify({url,expiresIn:60}));return true;}
     if(pathname==='/api/central/backups'&&req.method==='GET'){res.end(JSON.stringify(backupStatus()));return true;}
+    if(pathname==='/api/central/backups/schedule'&&req.method==='GET'){res.end(JSON.stringify(backupScheduleStatus()));return true;}
+    if(pathname==='/api/central/backups/schedule'&&req.method==='POST'){res.end(JSON.stringify(configureBackupSchedule(body)));return true;}
     if(pathname==='/api/central/backups/create'&&req.method==='POST'){res.statusCode=202;res.end(JSON.stringify(startBackup(body||{})));return true;}
     if(pathname==='/api/central/backups/restore'&&req.method==='POST'){res.statusCode=202;res.end(JSON.stringify(startRestore(body)));return true;}
     if(pathname==='/api/central/backups/verify'&&req.method==='POST'){res.statusCode=202;res.end(JSON.stringify(startRestore(body,true)));return true;}
@@ -205,6 +214,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
       const entry = config.clients.find(c => c.id === body?.id && !c.admin);
       if (!entry) throw new ApiError(404, 'Client not found');
       if (body.role !== undefined && !['inference','operator','developer'].includes(body.role)) throw new ApiError(400,'Invalid client role');
+      if(entry.archivedAt)throw new ApiError(409,'Restore archived application before editing it');
       if (!Array.isArray(body.models) || body.models.some((m: unknown) => typeof m !== 'string') || !Number.isInteger(body.rpm) || body.rpm < 1 || body.rpm > 600 || !Number.isInteger(body.maxTokens) || body.maxTokens < 1 || body.maxTokens > 2048 || !Number.isInteger(body.maxConcurrent) || body.maxConcurrent < 1 || body.maxConcurrent > 16) throw new ApiError(400, 'Invalid client limits');
       if(body.name!==undefined&&body.name.trim()!==entry.name&&config.clients.some(c=>c.id!==entry.id&&c.name.trim().normalize('NFKC').toLowerCase()===body.name.trim().normalize('NFKC').toLowerCase()))throw new ApiError(409,'Client name already exists');
       if(body.name!==undefined)entry.name=body.name.trim();if(body.enabled!==undefined)entry.enabled=body.enabled;if(body.scopes!==undefined)entry.scopes=[...new Set(body.scopes)] as string[];if(body.dailyTokenLimit!==undefined)entry.dailyTokenLimit=body.dailyTokenLimit;if(body.priority!==undefined)entry.priority=body.priority;if(body.maxContextTokens!==undefined)entry.maxContextTokens=body.maxContextTokens;
@@ -228,7 +238,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if (pathname === '/v1/models' && req.method === 'GET') {
     requireScope(client,'models:read');
     if ((config.provider || 'embedded') === 'embedded') {
-      const models = listLocalModels().filter(m => !client.models.length || client.models.includes(m.id));
+      const models = [...new Map([...listLocalModels(),...amuInference.workers().filter(w=>w.remote).map(w=>({id:w.model}))].map(m=>[m.id,m])).values()].filter(m => !client.models.length || client.models.includes(m.id));
       res.end(JSON.stringify({ object: 'list', data: models.map(m => ({ id: m.id, object: 'model', created: 0, owned_by: 'amu-local' })) })); return true;
     }
     const response = await upstream('/models');
@@ -262,8 +272,10 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   const disconnect = () => { if (!res.writableEnded) controller.abort(); };
   res.on('close', disconnect);
   let acquired = false;
+  let finishIdentity:ReturnType<typeof claimRequestIdentity>,identitySucceeded=false;
   const heartbeat=setInterval(()=>{if(body.stream&&res.headersSent&&!res.writableEnded&&!res.destroyed)res.write(': keep-alive\n\n');},15000);heartbeat.unref();
   try {
+    finishIdentity=claimRequestIdentity(client.id,req.headers['idempotency-key'],body);
     await acquire(controller.signal,client); acquired = true;
     const request=requests.get(requestId);if(request)request.state='inference-submitted';
     if (!client.enabled) throw new ApiError(401, 'Client access revoked');
@@ -281,6 +293,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
       if (body.stream) { chunk({}, result.finishReason); if(body.stream_options?.include_usage===true)res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created,model,choices:[],usage:{...result.usage,total_tokens:result.usage.prompt_tokens+result.usage.completion_tokens}})+'\n\n');res.end('data: [DONE]\n\n'); }
       else res.end(JSON.stringify({ id, object: 'chat.completion', created, model, choices: [{ index: 0, message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }], usage: { ...result.usage, total_tokens: result.usage.prompt_tokens + result.usage.completion_tokens } }));
       record({ action: 'completion', backend: 'embedded', client: client.id, model, stream: !!body.stream, durationMs: result.durationMs, ttftMs: result.ttftMs });
+      identitySucceeded=true;
       return true;
     }
     const response = await upstream('/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages: body.messages, stream: body.stream === true, temperature: body.temperature, max_tokens: body.max_tokens }), signal: controller.signal });
@@ -295,6 +308,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
     } else {const result=await response.json() as any;const u=result.usage;if(u&&Number.isSafeInteger(u.prompt_tokens)&&u.prompt_tokens>=0&&Number.isSafeInteger(u.completion_tokens)&&u.completion_tokens>=0){settleTokens(u);settled=true;}res.end(JSON.stringify(result));}
     if(!settled){settleTokens(undefined,true);settled=true;}
     record({ action: 'completion', client: client.id, model, stream: !!body.stream });
-  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { if(!settled)settleTokens(undefined,inferenceStarted);clearInterval(heartbeat);requestControllers.delete(requestId);requests.delete(requestId);controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
+    identitySucceeded=true;
+  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { try{finishIdentity?.(identitySucceeded);}catch{console.error('Request identity journal persistence failed; inspect durable records before retrying');}if(!settled)settleTokens(undefined,inferenceStarted);clearInterval(heartbeat);requestControllers.delete(requestId);requests.delete(requestId);controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
   return true;
 }

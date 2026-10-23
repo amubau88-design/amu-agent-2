@@ -4,10 +4,13 @@ import { amuInference } from './inference/engine.ts';
 import { recordSystemEvent, monitoringStatus, stopMonitoring } from './core/monitoring.ts';
 import fs from 'node:fs';
 import { recoverInterruptedTasks } from './core/controller.ts';
+import {amuCore} from './core/controller.ts';
+import {startBackupScheduler,stopBackupScheduler} from './backup/scheduler.ts';
 
 const port = Number(process.env.PORT) || 3030;
 const server = await startServer(port).catch(error => { if(process.connected)process.send?.({type:'startup_error',code:error.code||'STARTUP_FAILED'});throw error; });
 recoverInterruptedTasks();
+startBackupScheduler(()=>!amuCore.isBusy()&&!amuInference.status().active&&!amuInference.status().queued);
 const pidFile = process.env.AMU_PID_FILE || 'scratch/central-server.pid';
 fs.writeFileSync(pidFile, String(process.pid));
 recordSystemEvent('server_started', { port, pid: process.pid });
@@ -19,6 +22,7 @@ let stopping = false;
 async function shutdown(code: number) {
   if (stopping) return; stopping = true;
   clearInterval(heartbeat); recordSystemEvent('server_stopping', { code });
+  stopBackupScheduler();
   const force = setTimeout(() => process.exit(code), 8000); force.unref();
   server.close(); server.closeAllConnections();
   await amuInference.close(); stopMonitoring();

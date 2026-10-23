@@ -30,3 +30,20 @@ Bei 429/503 den `Retry-After`-Hinweis und begrenztes Backoff beachten. Teilweise
 Im Dashboard eine vollständige **verschlüsselte** Sicherung mit Modellgewichten erstellen und prüfen. Paket und Passwort bzw. lokalen Wiederherstellungsschlüssel getrennt sicher übertragen. Auf dem Ziel importieren, mit dem ursprünglichen Passwort/Schlüssel prüfen und in ein neues Verzeichnis restaurieren. Erst nach Sichtprüfung der Dateien und Anpassung der CPU-/RAM-/Workerwerte übernehmen; die aktuelle Installation wird durch die Restore-Funktion nicht überschrieben.
 
 Vor dem ersten Start auf dem Ziel Bind-Adresse, TLS-SANs, Dateipfade, verfügbare CPUs und Worker-Kontextgrenzen kontrollieren. Ein an eine alte IP gebundenes Netzwerkprofil gegebenenfalls zunächst auf Loopback zurückstellen. Abhängigkeiten aus dem Lockfile installieren, Modellintegrität prüfen und die passende lokale Dienst-/Autostart-Konfiguration neu einrichten. Eine gegebenenfalls vorhandene alte Windows-Aufgabe enthält rechnergebundene Pfade und wird nicht ungeprüft übertragen.
+
+## Verbindungstest ab Sitzung 5
+
+Im Dashboard pro Anwendung „Verbindungskonfiguration“ aufrufen. Nur den individuellen Client-Schlüssel auf dem zweiten Rechner als geschützte Datei ablegen. Die Konfiguration enthält bewusst einen Platzhalter. Schlüssel nicht in Quellcode oder Kommandozeilenargumente schreiben; SDK-Generierungswiederholungen auf null setzen.
+
+```powershell
+$env:AMU_API_BASE_URL='https://192.168.2.100:3030/v1' # tatsächliche private IP mit Zertifikats-SAN verwenden
+$env:AMU_CA_FILE='C:\geschuetzt\amu-ca.pem'
+$env:AMU_CLIENT_KEY_FILE='C:\geschuetzt\amu-agent-3.key'
+node scripts/test-client-connection.mjs
+# Erst nach erfolgreicher Verbindung einen kurzen echten SSE-Auftrag ausführen:
+node scripts/test-client-connection.mjs --chat
+```
+
+Der erste Aufruf prüft Gesundheit und autorisierte Modelle. Der zweite führt einmalig einen Auftrag mit höchstens acht Ausgabetokens und einer neuen Idempotenz-ID aus. Beide senden Schlüssel nur im Authorization-Header und geben sie nicht aus. TLS-/CA-Prüfung bleibt aktiv; öffentliche Ziele werden vom Testhelfer abgewiesen. Ein erfolgreicher Aufruf auf Agent-2 selbst ist weiterhin kein Zwei-Computer-Nachweis. Das Helferskript gehört zu Agent-2; diese Sitzung ändert Agent-3 nicht.
+
+Weitere Inferenzserver werden getrennt als Worker registriert: [Sitzung-5-Anleitung](session5-platform.md). Gateway-Zugangsdaten und Worker-Zugangsdaten sind unterschiedliche Berechtigungen.

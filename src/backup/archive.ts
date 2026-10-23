@@ -12,7 +12,7 @@ export async function hashFile(file:string){const hash=crypto.createHash('sha256
 function keyFor(passphrase:string,salt:Buffer){if(typeof passphrase!=='string'||passphrase.length<12||passphrase.length>1024)throw new EngineError(400,'Backup passphrase must contain 12–1024 characters');return crypto.scryptSync(passphrase,salt,32,{N:32768,r:8,p:1,maxmem:64*1024**2});}
 async function write(stream:NodeJS.WritableStream,data:Buffer|string){if(!stream.write(data))await once(stream,'drain');}
 async function collect(root:string,relative:string,entries:Entry[]){const file=path.join(root,relative),stat=await fsp.lstat(file);if(stat.isSymbolicLink())throw new EngineError(403,'Backup refuses symbolic links');if(stat.isDirectory()){for(const child of await fsp.readdir(file))await collect(root,path.join(relative,child),entries);return;}if(!stat.isFile())throw new EngineError(400,'Unsupported backup file');entries.push({path:relative.split(path.sep).join('/'),bytes:stat.size,sha256:await hashFile(file)});}
-export async function createArchive(root:string,output:string,passphrase:string,includes:string[],exclude:string[]=[]){
+export async function createArchive(root:string,output:string,passphrase:string,includes:string[],exclude:string[]=[],manifest?:object){
  if(fs.existsSync(output))throw new EngineError(409,'Backup destination already exists');
  const entries:Entry[]=[];for(const relative of includes){if(!inside(root,path.resolve(root,relative)))throw new EngineError(403,'Backup path outside project');if(fs.existsSync(path.join(root,relative)))await collect(root,relative,entries);}
  const files=entries.filter(e=>!exclude.some(prefix=>e.path===prefix||e.path.startsWith(prefix+'/')));if(new Set(files.map(e=>e.path)).size!==files.length)throw new EngineError(400,'Overlapping backup paths');
@@ -23,8 +23,9 @@ export async function createArchive(root:string,output:string,passphrase:string,
  void pipe.catch(()=>{});
  const record=async(value:object)=>{const body=Buffer.from(JSON.stringify(value));const length=Buffer.alloc(4);length.writeUInt32BE(body.length);await write(cipher,length);await write(cipher,body);};
  try{
+  if(manifest){const data=Buffer.from(JSON.stringify(manifest));if(files.some(e=>e.path==='.amu-backup-manifest.json'))throw new EngineError(409,'Reserved backup manifest path');await record({path:'.amu-backup-manifest.json',bytes:data.length,sha256:crypto.createHash('sha256').update(data).digest('hex')});await write(cipher,data);}
   for(const entry of files){await record(entry);const hash=crypto.createHash('sha256');let bytes=0;for await(const chunk of fs.createReadStream(path.join(root,entry.path))){hash.update(chunk);bytes+=chunk.length;await write(cipher,chunk);}if(bytes!==entry.bytes||hash.digest('hex')!==entry.sha256)throw new EngineError(409,'Source changed while creating backup: '+entry.path);}
-  await record({end:true,count:files.length});cipher.end();await pipe;if(outError)throw outError;const durable=await fsp.open(temporary,'r+');try{await durable.sync();}finally{await durable.close();}await fsp.rename(temporary,output);return {files:files.length,bytes:(await fsp.stat(output)).size};
+  await record({end:true,count:files.length+(manifest?1:0)});cipher.end();await pipe;if(outError)throw outError;const durable=await fsp.open(temporary,'r+');try{await durable.sync();}finally{await durable.close();}await fsp.rename(temporary,output);return {files:files.length+(manifest?1:0),bytes:(await fsp.stat(output)).size};
  }catch(error){cipher.destroy();out.destroy();await pipe.catch(()=>{});throw error;}finally{key.fill(0);}
 }
 
