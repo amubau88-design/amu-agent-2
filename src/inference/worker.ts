@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import crypto from 'node:crypto';
 import { getLlama, LlamaChatSession, LlamaLogLevel } from 'node-llama-cpp';
 
-const port = { postMessage: (message: any) => process.send?.({ ...message, nativeProcess: { pid: process.pid, memory: process.memoryUsage() } }), on: (event: string, listener: (message: any) => void) => process.on(event, listener) };
+const port = { postMessage: (message: any) => process.send?.({ ...message, nativeProcess: { pid: process.pid, memory: process.memoryUsage(), cpuUsage:process.cpuUsage(), uptimeSeconds:process.uptime() } }), on: (event: string, listener: (message: any) => void) => process.on(event, listener) };
 process.on('disconnect', () => process.exit(0));
 const checksum = crypto.createHash('sha256');
 for await (const chunk of createReadStream(workerData.modelPath)) checksum.update(chunk);
@@ -28,7 +28,7 @@ port.on('message', async (job) => {
     const messages = job.messages;
     if (messages.at(-1)?.role !== 'user') throw Object.assign(new Error('Last message must be a user message'), { status: 400 });
     const inputTokens = messages.reduce((n: number, m: any) => n + model.tokenize(m.content).length + 16, 32);
-    if (inputTokens + job.maxTokens > workerData.contextSize) throw Object.assign(new Error('Messages and max_tokens exceed context capacity'), { status: 400 });
+    if (inputTokens + job.maxTokens > Math.min(workerData.contextSize,job.maxContextTokens||workerData.contextSize)) throw Object.assign(new Error('Messages and max_tokens exceed context capacity'), { status: 400 });
     session.setChatHistory(messages.slice(0, -1).map((m: any) => m.role === 'assistant' ? { type: 'model', response: [m.content] } : { type: m.role, text: m.content }));
     const before = sequence.tokenMeter.getState();
     const content = await session.prompt(messages.at(-1).content, {

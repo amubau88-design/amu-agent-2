@@ -1,13 +1,13 @@
+import {platform} from '../central/platform.ts';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readGgufFileInfo } from 'node-llama-cpp';
 import { EngineError, hardware, listLocalModels, modelPath } from './models.ts';
-const GiB = 1024 ** 3;
 export type ModelAssessment = { id: string; bytes: number; architecture: string; contextSize: number; estimatedRamBytes: number; availableBudgetBytes: number; loadable: boolean; reason: string; estimateOnly: true };
 const metadataCache = new Map<string, { key: string; estimatedRamBytes: number; architecture: string }>();
 export function memoryBudget(total = os.totalmem(), free = os.freemem(), reclaimable = 0) {
-  return Math.max(0, Math.min(total * 0.65, free + reclaimable - Math.max(2 * GiB, total * 0.1)));
+  return Math.max(0, Math.min(total * platform.memoryFraction, free + reclaimable - Math.max(platform.reserveMiB*1024**2, total * 0.1)));
 }
 export function assertMemoryBudget(estimated: number, budget: number) { if (!Number.isFinite(estimated) || estimated <= 0 || estimated > budget) throw new EngineError(507, 'Model and context exceed the safe RAM budget; the active model was not changed'); }
 export async function assessModel(id: string, reclaimable = 0): Promise<ModelAssessment> {

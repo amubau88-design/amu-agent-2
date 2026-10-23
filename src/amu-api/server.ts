@@ -1,10 +1,11 @@
+import { observeRequest } from '../central/usage.ts';
 import http from 'node:http';
 import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { handleApiRequest } from './routes.ts';
-import { ApiError, authenticate, requireAdmin, centralRoute, health } from '../central/service.ts';
+import { ApiError, authenticate, requireAdmin, centralRoute, health, requireScope } from '../central/service.ts';
 import { EngineError } from '../inference/models.ts';
 import { amuCore } from '../core/controller.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
@@ -28,8 +29,10 @@ export function createAmuApiServer(): http.Server {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(await fs.readFile(path.resolve('src/web-ui/public', filename), 'utf8')); return;
       }
+      if(req.method==='GET'&&['/ready','/readyz','/v1/ready'].includes(pathname)){const state=await health();res.statusCode=state.inferenceReady?200:503;res.end(JSON.stringify(state));return;}
       if (req.method === 'GET' && pathname === '/health') { res.end(JSON.stringify(await health())); return; }
       const client = authenticate(req);
+      const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);};res.once('finish',observe);res.once('close',observe);
       checkNetworkAccess(req.socket.remoteAddress || '', client.admin);
       if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status') requireAdmin(client);
       let body: any = null;
@@ -43,7 +46,7 @@ export function createAmuApiServer(): http.Server {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
       if (pathname.startsWith('/api/core/')) {
-        requireRole(client,['admin','developer']);
+        requireScope(client,'core:tasks');requireRole(client,['admin','developer']);
         if(req.method==='POST'&&(pathname==='/api/core/tasks'||pathname.endsWith('/resume'))&&client.models.length&&!client.models.includes(amuInference.status().model))throw new ApiError(403,'Active model is outside this client model grant');
         const controller = new AbortController();
         const disconnect = () => { if (!res.writableEnded) controller.abort(); };
@@ -71,7 +74,7 @@ export function createAmuApiServer(): http.Server {
       const status = error instanceof ApiError || error instanceof EngineError ? error.status : (error as Error).name === 'TimeoutError' ? 504 : 503;
       recordSystemEvent('request_error', { requestId, status, category: (error as Error).name });
       res.writeHead(status);
-      res.end(JSON.stringify({ error: { message: error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status) }, requestId }));
+      res.end(JSON.stringify({ error: { message: error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status), reason: ({400:'invalid_request',401:'authentication_failed',403:'permission_denied',404:'not_found',409:'state_conflict',429:'resource_limit',499:'cancelled',503:'service_unavailable',504:'deadline_exceeded',507:'insufficient_memory'} as Record<number,string>)[status]||'request_failed' }, requestId }));
     }
   };
   const tls = tlsOptions();

@@ -5,7 +5,7 @@ export class AMUEmbeddedAdapter implements AIRuntimeAdapter {
   id = 'amu-embedded';
   name = 'AMU Embedded Inference';
   async isHealthy() { try { await amuInference.initialize(); return amuInference.status().ready; } catch { return false; } }
-  getModelInfo() { return { id: amuInference.status().model || 'not-installed', name: 'AMU local GGUF', contextWindow: 4096, isLocal: true }; }
+  getModelInfo() { return { id: amuInference.status().model || 'not-installed', name: 'AMU local GGUF', contextWindow: amuInference.status().hardware.contextSize, isLocal: true }; }
   async generate(request: AIRuntimeRequest): Promise<AIRuntimeResponse> { return this.generateStream(request, () => {}); }
   async generateStream(request: AIRuntimeRequest, onChunk: (chunk: AIRuntimeStreamChunk) => void): Promise<AIRuntimeResponse> {
     const messages = [...request.messages];

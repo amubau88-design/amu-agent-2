@@ -1,3 +1,5 @@
+import {platform, fairIndex} from '../central/platform.ts';
+import {generationLease} from './policy.ts';
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -6,7 +8,7 @@ import { EngineError, hardware, listLocalModels, modelPath } from './models.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { assessModel, assertMemoryBudget } from './resources.ts';
 export type Message = { role: 'system' | 'user' | 'assistant'; content: string };
-export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean };
+export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number };
 export type GenerationResult = { content: string; usage: { prompt_tokens: number; completion_tokens: number }; finishReason: 'stop' | 'length'; ttftMs: number; durationMs: number };
 
 type Job = { id: string; input: Generation; resolve: (r: GenerationResult) => void; reject: (e: Error) => void; cleanup: () => void; cancel: (reason?: Error) => void; cancelling?:boolean; cancellationTimer?:NodeJS.Timeout };
@@ -23,6 +25,7 @@ export class AMUInferenceEngine {
   private initializing?: Promise<void>;
   private current?: Job;
   private queue: Job[] = [];
+  private lastClient='';private dispatchTurn=0;
   private state = 'unloaded';
   private selected = listLocalModels()[0]?.id || '';
   private lastError: string | null = null;
@@ -97,8 +100,9 @@ export class AMUInferenceEngine {
     if (!Array.isArray(input.messages) || !input.messages.length || input.messages.some(m => !['system','user','assistant'].includes(m.role) || typeof m.content !== 'string') || !Number.isInteger(input.maxTokens ?? 256) || (input.maxTokens ?? 256) < 1 || (input.maxTokens ?? 256) > 2048) return Promise.reject(new EngineError(400, 'Invalid generation input'));
     if (!listLocalModels().some(m => m.id === input.model)) return Promise.reject(new EngineError(404, 'Local model not installed'));
     if (input.model !== this.selected) return Promise.reject(new EngineError(409, 'Select this model in AMU administration before inference'));
-    if (this.closing || this.queue.length >= 16) return Promise.reject(new EngineError(429, 'AMU inference queue unavailable or full'));
-    return new Promise((resolve, reject) => {
+    if (this.closing || this.queue.length >= platform.queueCapacity) return Promise.reject(new EngineError(429, 'AMU inference queue unavailable or full'));
+    let lease:ReturnType<typeof generationLease>;try{lease=generationLease(input);}catch(e){return Promise.reject(e);}
+    const result=new Promise<GenerationResult>((resolve, reject) => {
       const job: Job = { id: crypto.randomUUID(), input, resolve, reject, cleanup: () => {}, cancel: () => {} };
       const abort = (reason?: unknown) => {
         if(job.cancelling)return;
@@ -111,21 +115,23 @@ export class AMUInferenceEngine {
         }
         job.cleanup(); reject(reason instanceof Error ? reason : input.signal?.reason || new EngineError(504, 'Generation deadline exceeded'));
       };
-      const timer = setTimeout(abort, 120000);
+      const timer = setTimeout(abort, platform.requestTimeoutMs);
       job.cancel = abort;
       job.cleanup = () => { clearTimeout(timer); input.signal?.removeEventListener('abort', abort); };
       input.signal?.addEventListener('abort', abort, { once: true });
       this.queue.push(job); void this.pump();
     });
+    return result.then(value=>{lease?.settle(value);return value;},error=>{lease?.settle();throw error;});
   }
   private async pump() {
     if (this.current || !this.queue.length || this.closing) return;
     try { await this.initialize(); }
     catch (error) { for (const job of this.queue.splice(0)) { job.cleanup(); job.reject(error as Error); } return; }
     if (this.current || !this.queue.length || this.closing) return;
-    const job = this.queue.shift()!;
+    const index=fairIndex(this.queue,j=>j.input.clientId||'internal',j=>j.input.priority||0,this.lastClient,this.dispatchTurn++);
+    const [job]=this.queue.splice(index,1);if(this.dispatchTurn%2===1)this.lastClient=job.input.clientId||'internal';
     this.current = job;
-    this.worker!.send({ type: 'generate', id: job.id, messages: job.input.messages, maxTokens: job.input.maxTokens ?? 256, temperature: job.input.temperature ?? 0.2, responseSchema: job.input.responseSchema });
+    this.worker!.send({ type: 'generate', id: job.id, messages: job.input.messages, maxTokens: job.input.maxTokens ?? 256, temperature: job.input.temperature ?? 0.2, responseSchema: job.input.responseSchema, maxContextTokens:job.input.maxContextTokens });
   }
   async selectModel(id: string) {
     if (this.current || this.queue.length || this.initializing || this.switching) throw new EngineError(409, 'Engine is busy');
@@ -149,7 +155,7 @@ export class AMUInferenceEngine {
   async restart() { if (this.current || this.queue.length || this.initializing || this.switching) throw new EngineError(409, 'Restart requires an idle engine'); this.switching = true; try { await this.stopWorker(); this.state = 'unloaded'; this.paused = false; await this.initialize(true); } finally { this.switching = false; } }
   cancel(id: string) { const job = [this.current, ...this.queue].find(j => j?.id === id); if (!job) throw new EngineError(404, 'Inference request not found'); job.cancel(new EngineError(499,'Generation cancelled by operator')); return true; }
   async enforceMemoryPressure(freeBytes=os.freemem()) {
-    if(freeBytes>=512*1024**2||!this.worker||this.paused||this.closing||this.switching)return false;
+    if(freeBytes>=platform.criticalFreeMiB*1024**2||!this.worker||this.paused||this.closing||this.switching)return false;
     this.paused=true;this.state='memory-pressure';this.lastError='Critical system RAM pressure; AMU inference was unloaded';
     const error=new EngineError(507,this.lastError);for(const job of this.queue.splice(0)){job.cleanup();job.reject(error);}
     if(this.current){this.current.cleanup();clearTimeout(this.current.cancellationTimer);this.current.reject(error);this.current=undefined;}

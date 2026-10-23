@@ -1,3 +1,4 @@
+import {platform} from '../central/platform.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -26,6 +27,6 @@ export class EngineError extends Error {
 }
 export const hardware = {
   cpu: os.cpus()[0]?.model, logicalCpus: os.availableParallelism(), totalMemory: os.totalmem(),
-  threads: Math.max(1, Math.min(4, Math.floor(os.availableParallelism() / 2))), contextSize: 4096,
+  threads: platform.threads, contextSize: platform.contextSize,
   gpu: false as const, parallelSequences: 1,
 };

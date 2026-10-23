@@ -22,4 +22,6 @@ Gewichte und private Daten gehören nicht in Git. Für eine andere Installation 
 
 API-Verwaltung, Queue, Client-Rechte, Entwicklungssteuerung, Dateischutz und Überwachung sind AMU-Software. Die mathematische Modellausführung verwendet `node-llama-cpp`/`llama.cpp`; die derzeitigen Modellgewichte sind Qwen2.5-1.5B unter Apache-2.0. Das Projekt ist kein neu trainiertes KI-Grundmodell.
 
-Aktueller Stand nach Entwicklungssitzung 2: [session2-engine.md](docs/session2-engine.md). Windows-Anmeldeautostart, Checkpoints/Wiederaufnahme, Rollen, RAM-Schutz und TLS-Vorbereitung sind ergänzt. Der tatsächlich laufende Server bleibt standardmäßig auf Loopback beschränkt.
+Historischer Stand nach Entwicklungssitzung 2: [session2-engine.md](docs/session2-engine.md). Windows-Anmeldeautostart, Checkpoints/Wiederaufnahme, Rollen, RAM-Schutz und TLS-Vorbereitung sind ergänzt. Der tatsächlich laufende Server bleibt standardmäßig auf Loopback beschränkt.
+
+Aktueller Stand: **1.3.0 – zentrale Multi-Client-Plattform**. Beliebige Anwendungen, API-Freigaben, dauerhafte Nutzung und Tagesbudgets, faire Warteschlangen, Readiness und portable Ressourcenprofile. Betriebsstatus, Grenzen, Sicherungen und nächste Schritte: [Sitzung 3](docs/session3-platform.md). Gezielte Tests: `npm run test:session3`.

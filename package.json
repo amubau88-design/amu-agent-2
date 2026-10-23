@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -16,7 +16,9 @@
     "test:embedded": "node --experimental-strip-types src/tests/embedded-engine.test.ts",
     "test:safe": "npm run test:central && npm run test:embedded",
     "test:session2": "node --experimental-strip-types src/tests/session2-core.test.ts && node --experimental-strip-types src/tests/session2-runtime.test.ts",
-    "windows:status": "powershell -NoProfile -File scripts/windows-autostart.ps1 -Action Status"
+    "windows:status": "powershell -NoProfile -File scripts/windows-autostart.ps1 -Action Status",
+    "test:session3": "node --experimental-strip-types src/tests/session3-platform.test.ts && node --experimental-strip-types src/tests/session3-native.test.ts",
+    "snapshot:create": "node scripts/portable-snapshot.mjs create"
   },
   "keywords": [],
   "author": "AMU Team",
