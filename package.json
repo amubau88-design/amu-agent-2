@@ -1,0 +1,24 @@
+{
+  "name": "amu-agent-2",
+  "version": "1.0.0",
+  "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --experimental-strip-types src/index.ts",
+    "test": "node --test src/tests/*.test.ts",
+    "test:phase1": "node --experimental-strip-types src/tests/phase1-verification.ts",
+    "test:central": "node --experimental-strip-types src/tests/central-server.test.ts"
+  },
+  "keywords": [],
+  "author": "AMU Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "node-llama-cpp": "3.22.2"
+  }
+}

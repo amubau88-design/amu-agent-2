@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMU-Agent-2 | Autonomer KI-Entwickler & Kontrollzentrum</title>
+  <style>
+    :root {
+      --bg-color: #0b1120;
+      --card-bg: #1e293b;
+      --card-header: #0f172a;
+      --border-color: #334155;
+      --text-color: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent-color: #38bdf8;
+      --accent-hover: #0284c7;
+      --success-color: #22c55e;
+      --warning-color: #eab308;
+      --danger-color: #ef4444;
+      --purple-color: #a855f7;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.5;
+      padding: 16px;
+    }
+
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .app-title h1 { font-size: 1.3rem; color: var(--accent-color); font-weight: 700; }
+    .app-title p { font-size: 0.8rem; color: var(--text-muted); }
+
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 8px;
+    }
+    .tab-btn {
+      background: var(--card-bg);
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+    }
+    .tab-btn.active, .tab-btn:hover {
+      background: #0284c7;
+      color: #fff;
+      border-color: var(--accent-color);
+    }
+
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    .grid-layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--accent-color);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-success { background: rgba(34, 197, 94, 0.2); color: var(--success-color); }
+    .badge-warning { background: rgba(234, 179, 8, 0.2); color: var(--warning-color); }
+    .badge-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger-color); }
+    .badge-purple { background: rgba(168, 85, 247, 0.2); color: var(--purple-color); }
+
+    .metrics-list { display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem; }
+    .metric-row { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px; }
+    .metric-label { color: var(--text-muted); }
+    .metric-val { font-family: monospace; font-weight: 600; }
+
+    /* Task Steps */
+    .step-item {
+      padding: 10px;
+      background: #0f172a;
+      border-left: 3px solid var(--border-color);
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+    }
+    .step-item.completed { border-color: var(--success-color); }
+    .step-item.in_progress { border-color: var(--warning-color); background: #172554; }
+    .step-item.failed { border-color: var(--danger-color); }
+    .step-title { font-weight: 600; display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .step-desc { font-size: 0.75rem; color: var(--text-muted); }
+
+    /* Action Buttons */
+    .btn-group { display: flex; gap: 8px; margin-top: 10px; }
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-primary { background: var(--accent-color); color: #000; }
+    .btn-warning { background: var(--warning-color); color: #000; }
+    .btn-danger { background: var(--danger-color); color: #fff; }
+    .btn-success { background: var(--success-color); color: #000; }
+
+    /* Terminal Console */
+    .console-box {
+      background: #050811;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: Consolas, monospace;
+      font-size: 0.8rem;
+      height: 350px;
+      overflow-y: auto;
+      color: #38bdf8;
+      white-space: pre-wrap;
+    }
+
+    input, textarea, select {
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent-color); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border-color); }
+    th { color: var(--accent-color); }
+  </style>
+</head>
+<body><div style="padding:12px;background:#172334;color:white"><a href="/admin" style="color:#7dd3fc">KI/API-Verwaltung</a> <label>Administrator-Schlüssel <input id="centralLegacyKey" type="password" autocomplete="off"></label><button onclick="loadAllData()">Anmelden / Neu laden</button></div>
+
+  <header class="app-header">
+    <div class="app-title">
+      <h1>AMU-Agent-2 &bull; Autonomer KI-Entwickler & Kontrollzentrum</h1>
+      <p>Multi-Step Entwickler-Engine &bull; GitHub Integration &bull; Lokale Apps & Server &bull; Admin Approval Gate</p>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a href="http://agent2.amu.test" target="_blank" class="badge badge-purple" style="text-decoration:none; cursor:pointer;" title="Lokale Testdomain">http://agent2.amu.test</a>
+      <a href="http://localhost:3000" target="_blank" class="badge badge-success" style="text-decoration:none;">http://localhost:3000</a>
+      <span id="ai-status-badge" class="badge badge-purple">AMU AI: Bereit</span>
+    </div>
+  </header>
+
+  <!-- NAVIGATION TABS -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('tab-dev')">💻 Entwickler-Aufträge (Engine)</button>
+    <button class="tab-btn" onclick="switchTab('tab-projects')">🚀 Lokale Projekte & Domains</button>
+    <button class="tab-btn" onclick="switchTab('tab-github')">🐙 GitHub Integration</button>
+    <button class="tab-btn" onclick="switchTab('tab-servers')">🖥️ Server & Deployment</button>
+    <button class="tab-btn" onclick="switchTab('tab-chat')">💬 Direktes Auftragsterminal</button>
+  </div>
+
+  <!-- TAB 1: ENTWICKLER ENGINE & LONG-RUNNING TASKS -->
+  <div id="tab-dev" class="tab-pane active">
+    <div class="grid-layout">
+      <!-- Linke Spalte: Neuer Auftrag & Steuerung -->
+      <div>
+        <div class="card">
+          <div class="card-title">Neuen Entwicklungsauftrag starten</div>
+          <label class="metric-label">Ziel / Vorgabe:</label>
+          <textarea id="dev-goal" rows="4" placeholder="z. B. 'Baue eine REST API für Produktverwaltung mit TypeScript, Express und Validierung'"></textarea>
+          <button class="btn btn-primary" onclick="startDevTask()" style="width:100%;">Plan erstellen & Auftrag starten 🚀</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Auftrags-Steuerung & Checkpoints</div>
+          <label class="metric-label">Verfügbare Aufträge / Historie:</label>
+          <select id="task-select" onchange="onTaskSelect(this.value)" style="margin-bottom:10px;"></select>
+          <div class="btn-group" style="justify-content:space-between;">
+            <button class="btn btn-primary" onclick="stepDevTask()">Nächster Schritt ▶</button>
+            <button class="btn btn-warning" onclick="pauseDevTask()">Pausieren ⏸</button>
+            <button class="btn btn-success" onclick="resumeDevTask()">Fortsetzen ⏯</button>
+            <button class="btn btn-danger" onclick="cancelDevTask()">Rollback ⏪</button>
+          </div>
+          <div class="metrics-list" style="margin-top:12px;">
+            <div class="metric-row"><span class="metric-label">Aktive Task-ID:</span><span id="active-task-id" class="metric-val">--</span></div>
+            <div class="metric-row"><span class="metric-label">Status:</span><span id="active-task-status" class="badge badge-warning">Bereit</span></div>
+            <div class="metric-row"><span class="metric-label">Gespeicherte Checkpoints:</span><span id="active-checkpoints-count" class="metric-val">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rechte Spalte: Plan-Schritte & Live-Logs -->
+      <div>
+        <div class="card">
+          <div class="card-title">Aktueller Entwicklungsplan (Multi-Step)</div>
+          <div id="plan-steps-container">
+            <div class="step-item">Noch kein aktiver Auftrag. Gib links ein Entwicklungsziel ein.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Protokoll & Ausführungslogs</div>
+          <div id="dev-console" class="console-box">AMU-Agent-2 Entwickler-Engine bereit.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: LOKALE PROJEKTE & DOMAINS -->
+  <div id="tab-projects" class="tab-pane">
+    <div class="grid-layout">
+      <div>
+        <div class="card">
+          <div class="card-title">Neues Projekt anlegen</div>
+          <input type="text" id="new-proj-name" placeholder="Projektname (z. B. 'Kunden-Portal')" />
+          <select id="new-proj-type">
+            <option value="static">Statisches Webprojekt (HTML/JS)</option>
+            <option value="api">Backend REST API</option>
+            <option value="fullstack">Fullstack Web-App</option>
+          </select>
+          <button class="btn btn-primary" onclick="createLocalProject()" style="width:100%;">Projekt isoliert erstellen 📁</button>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">Verwaltete Lokale Entwicklungsumgebungen</div>
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Port / URL</th><th>Lokaler Hostname</th><th>Status</th><th>Aktion</th></tr>
+            </thead>
+            <tbody id="projects-table-body">
+              <tr><td colspan="5">Lade Projekte...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: GITHUB INTEGRATION -->
+  <div id="tab-github" class="tab-pane">
+    <div class="grid-layout">
+      <div>
+        <div class="card">
+          <div class="card-title">GitHub Authentifizierungs-Status</div>
+          <div class="metrics-list">
+            <div class="metric-row"><span class="metric-label">Konfiguriert:</span><span id="gh-configured" class="metric-val">Prüfe...</span></div>
+            <div class="metric-row"><span class="metric-label">Benutzer:</span><span id="gh-user" class="metric-val">--</span></div>
+            <div class="metric-row"><span class="metric-label">Token Schutz:</span><span class="metric-val" style="color:var(--success-color)">Nicht im Code gespeichert ✅</span></div>
+          </div>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:12px;">
+            Tokens werden sicher über Umgebungsvariablen (<code>GITHUB_TOKEN</code>) geladen. Keine Speicherung in Klartext-Dateien.
+          </p>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">Verfügbare GitHub Repositories</div>
+          <table>
+            <thead><tr><th>Repository</th><th>Branch</th><th>Sichtbarkeit</th><th>Link</th></tr></thead>
+            <tbody id="gh-repos-body"><tr><td colspan="4">Kein Token hinterlegt oder lade Repositories...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: SERVER & DEPLOYMENT -->
+  <div id="tab-servers" class="tab-pane">
+    <div class="grid-layout">
+      <div>
+        <div class="card">
+          <div class="card-title">Server-Infrastruktur & Worker</div>
+          <table>
+            <thead><tr><th>Server Name</th><th>Host / Port</th><th>Status</th><th>Rolle</th></tr></thead>
+            <tbody id="servers-table-body"><tr><td colspan="4">Lade Server...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-title">Deployment & Domain Manager</div>
+          <table>
+            <thead><tr><th>Paket ID</th><th>Projekt</th><th>Umgebung</th><th>Domain</th><th>Status</th></tr></thead>
+            <tbody id="deployments-table-body"><tr><td colspan="5">Lade Deployments...</td></tr></tbody>
+          </table>
+          <p style="font-size:0.75rem; color:var(--warning-color); margin-top:12px;">
+            ⚠️ Sicherheitsregel: Produktive DNS- oder Server-Deployments erfordern stets deine explizite Admin-Freigabe!
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: DIREKTES TERMINAL (Bestehender Chat) -->
+  <div id="tab-chat" class="tab-pane">
+    <div class="card" style="height:480px; display:flex; flex-direction:column;">
+      <div class="card-title">Direktes Auftragsterminal & Routing-Test</div>
+      <div id="chat-messages" class="console-box" style="flex:1; margin-bottom:12px; color:#fff;">
+        <div style="color:var(--accent-color);">AMU-Agent-2 Schnellausführung bereit.</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="chat-input" placeholder="Schnellbefehl z.B. 'Hallo', 'Wissensfrage', 'Coding-Task'..." style="margin:0;" />
+        <button class="btn btn-primary" onclick="sendChatPrompt()">Ausführen</button>
+      </div>
+    </div>
+  </div>
+
+  <script>const originalFetch = window.fetch.bind(window); window.fetch = (input, options = {}) => { const headers = new Headers(options.headers); const key = document.getElementById("centralLegacyKey").value; if (typeof input === "string" && input.startsWith("/api/")) { headers.set("Authorization", "Bearer " + key); headers.delete("X-AMU-API-Key"); } return originalFetch(input, { ...options, headers }); };
+    let currentActiveTaskId = null;
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // Load initial data
+    async function loadAllData() {
+      // 1. Projects
+      try {
+        const resP = await fetch('/api/v1/projects');
+        const dataP = await resP.json();
+        if (dataP.success) renderProjects(dataP.data);
+      } catch {}
+
+      // 2. Servers
+      try {
+        const resS = await fetch('/api/v1/servers');
+        const dataS = await resS.json();
+        if (dataS.success) renderServers(dataS.data);
+      } catch {}
+
+      // 3. Deployments
+      try {
+        const resD = await fetch('/api/v1/deployments');
+        const dataD = await resD.json();
+        if (dataD.success) renderDeployments(dataD.data);
+      } catch {}
+
+      // 4. GitHub Status
+      try {
+        const resG = await fetch('/api/v1/github/status');
+        const dataG = await resG.json();
+        if (dataG.success) {
+          document.getElementById('gh-configured').innerText = dataG.data.configured ? 'Ja (Aktiv)' : 'Nicht konfiguriert (Lokal)';
+          document.getElementById('gh-user').innerText = dataG.data.username || 'Kein Benutzer';
+        }
+      } catch {}
+
+      // 5. Tasks
+      try {
+        const resT = await fetch('/api/v1/dev/tasks');
+        const dataT = await resT.json();
+        if (dataT.success && dataT.data.length > 0) {
+          allLoadedTasks = dataT.data;
+          updateTaskSelectDropdown(dataT.data);
+          // Auto-select active or latest completed task
+          const selected = allLoadedTasks.find(t => t.taskId === currentActiveTaskId) ||
+                           allLoadedTasks.find(t => t.status === 'completed') ||
+                           allLoadedTasks[0];
+          renderTask(selected);
+        }
+      } catch {}
+    }
+
+    let allLoadedTasks = [];
+
+    function updateTaskSelectDropdown(tasks) {
+      const select = document.getElementById('task-select');
+      if (!select) return;
+      select.innerHTML = tasks.map(t => {
+        const shortGoal = (t.goal || 'Auftrag').substring(0, 42);
+        return `<option value="${t.taskId}" ${t.taskId === currentActiveTaskId ? 'selected' : ''}>[${t.status.toUpperCase()}] ${shortGoal}... (${t.taskId.substring(0, 16)})</option>`;
+      }).join('');
+    }
+
+    function onTaskSelect(taskId) {
+      const task = allLoadedTasks.find(t => t.taskId === taskId);
+      if (task) renderTask(task);
+    }
+
+    function renderProjects(projects) {
+      const tbody = document.getElementById('projects-table-body');
+      tbody.innerHTML = projects.map(p => `
+        <tr>
+          <td><strong>${p.name}</strong></td>
+          <td><a href="${p.localUrl}" target="_blank" style="color:var(--accent-color);">${p.localUrl}</a></td>
+          <td><code>${p.localHostname}</code></td>
+          <td><span class="badge ${p.status === 'running' ? 'badge-success' : 'badge-warning'}">${p.status}</span></td>
+          <td>
+            ${p.status === 'running' 
+              ? `<button class="btn btn-danger" onclick="stopProject('${p.id}')">Stopp ⏹</button>`
+              : `<button class="btn btn-success" onclick="startProject('${p.id}')">Starten ▶</button>`}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderServers(servers) {
+      const tbody = document.getElementById('servers-table-body');
+      tbody.innerHTML = servers.map(s => `
+        <tr>
+          <td><strong>${s.name}</strong></td>
+          <td><code>${s.host}:${s.port}</code></td>
+          <td><span class="badge ${s.status === 'online' ? 'badge-success' : 'badge-warning'}">${s.status}</span></td>
+          <td>${s.type}</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderDeployments(deployments) {
+      const tbody = document.getElementById('deployments-table-body');
+      tbody.innerHTML = deployments.map(d => `
+        <tr>
+          <td><code>${d.id}</code></td>
+          <td>${d.projectId} (v${d.version})</td>
+          <td><span class="badge badge-purple">${d.targetEnv}</span></td>
+          <td>${d.domain}</td>
+          <td><span class="badge badge-warning">${d.status}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    function renderTask(task) {
+      if (!task) return;
+      currentActiveTaskId = task.taskId;
+      document.getElementById('active-task-id').innerText = task.taskId;
+      
+      const statusBadge = document.getElementById('active-task-status');
+      if (task.status === 'completed') {
+        statusBadge.className = 'badge badge-success';
+        statusBadge.innerText = 'COMPLETED (ERFOLGREICH)';
+      } else if (task.status === 'cancelled') {
+        statusBadge.className = 'badge badge-danger';
+        statusBadge.innerText = 'STORNIERT (ROLLBACK DURCHGEFÜHRT)';
+      } else if (task.status === 'paused') {
+        statusBadge.className = 'badge badge-warning';
+        statusBadge.innerText = 'PAUSIERT';
+      } else {
+        statusBadge.className = 'badge badge-warning';
+        statusBadge.innerText = task.status.toUpperCase();
+      }
+
+      document.getElementById('active-checkpoints-count').innerText = task.checkpoints ? task.checkpoints.length : 0;
+
+      // Select dropdown sync
+      const select = document.getElementById('task-select');
+      if (select && select.value !== task.taskId) {
+        select.value = task.taskId;
+      }
+
+      // Render Steps
+      const stepsDiv = document.getElementById('plan-steps-container');
+      if (task.plan && task.plan.steps) {
+        stepsDiv.innerHTML = task.plan.steps.map((s, idx) => `
+          <div class="step-item ${s.status}">
+            <div class="step-title">
+              <span>Schritt ${idx + 1}: ${s.title}</span>
+              <span class="badge ${s.status === 'completed' ? 'badge-success' : s.status === 'in_progress' ? 'badge-warning' : s.status === 'failed' ? 'badge-danger' : 'badge-purple'}">${s.status}</span>
+            </div>
+            <div class="step-desc">${s.description}</div>
+            ${s.result ? `<div style="font-size:0.75rem; color:var(--success-color); margin-top:4px;">Ergebnis: ${s.result}</div>` : ''}
+          </div>
+        `).join('');
+      }
+
+      // Logs
+      if (task.logs) {
+        document.getElementById('dev-console').innerText = task.logs.join('\n');
+      }
+    }
+
+    async function startDevTask() {
+      const goal = document.getElementById('dev-goal').value.trim();
+      if (!goal) return alert('Bitte ein Ziel eingeben');
+      const res = await fetch('/api/v1/dev/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllData();
+        renderTask(data.data);
+      }
+    }
+
+    async function stepDevTask() {
+      if (!currentActiveTaskId) return alert('Kein aktiver Auftrag ausgewählt');
+      const res = await fetch(`/api/v1/dev/tasks/${currentActiveTaskId}/step`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllData();
+        renderTask(data.data);
+      }
+    }
+
+    async function pauseDevTask() {
+      if (!currentActiveTaskId) return alert('Kein aktiver Auftrag ausgewählt');
+      const res = await fetch(`/api/v1/dev/tasks/${currentActiveTaskId}/pause`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllData();
+        renderTask(data.data);
+      }
+    }
+
+    async function resumeDevTask() {
+      if (!currentActiveTaskId) return alert('Kein aktiver Auftrag ausgewählt');
+      const res = await fetch(`/api/v1/dev/tasks/${currentActiveTaskId}/resume`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllData();
+        renderTask(data.data);
+      }
+    }
+
+    async function cancelDevTask() {
+      if (!currentActiveTaskId) return alert('Kein aktiver Auftrag ausgewählt');
+      const res = await fetch(`/api/v1/dev/tasks/${currentActiveTaskId}/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        await loadAllData();
+        renderTask(data.data);
+      }
+    }
+
+    async function createLocalProject() {
+      const name = document.getElementById('new-proj-name').value.trim();
+      const type = document.getElementById('new-proj-type').value;
+      if (!name) return alert('Projektname erforderlich');
+      const res = await fetch('/api/v1/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        document.getElementById('new-proj-name').value = '';
+        loadAllData();
+      }
+    }
+
+    async function startProject(id) {
+      await fetch(`/api/v1/projects/${id}/start`, { method: 'POST' });
+      loadAllData();
+    }
+
+    async function stopProject(id) {
+      await fetch(`/api/v1/projects/${id}/stop`, { method: 'POST' });
+      loadAllData();
+    }
+
+    async function sendChatPrompt() {
+      const input = document.getElementById('chat-input');
+      const prompt = input.value.trim();
+      if (!prompt) return;
+      const box = document.getElementById('chat-messages');
+      box.innerText += `\n\n> USER: ${prompt}\nLade Antwort...`;
+      input.value = '';
+
+      const res = await fetch('/api/v1/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-AMU-API-Key': document.getElementById('centralLegacyKey').value },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        box.innerText += `\n> AMU-AGENT-2 (${data.data.tier}): ${data.data.finalOutput}`;
+      } else {
+        box.innerText += `\n> FEHLER: ${data.error?.message || 'Unbekannt'}`;
+      }
+      box.scrollTop = box.scrollHeight;
+    }
+
+    setInterval(loadAllData, 4000);
+    loadAllData();
+  </script>
+</body>
+</html>
+
+
