@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import { executeCmdTool } from '../tool-runtime/cmd-tools.ts';
+import { checkSource } from '../core/validation.ts';
+import { SecurityGuard } from '../shared/security.ts';
 
 export interface VerificationRequest {
   type: 'syntax' | 'test' | 'file_exists' | 'build';
@@ -35,11 +37,12 @@ export class TaskVerifier {
         if (!req.targetPath) {
           return { passed: false, type: req.type, details: 'Missing targetPath', durationMs: Date.now() - startTime };
         }
-        const cmdRes = await executeCmdTool(`node --experimental-strip-types "${req.targetPath}"`);
+        new SecurityGuard().validatePathAccess(req.targetPath, 'read');
+        const result = checkSource(req.targetPath, await fs.readFile(req.targetPath, 'utf8'));
         return {
-          passed: cmdRes.success,
+          passed: result.passed,
           type: req.type,
-          details: cmdRes.success ? 'Syntax check passed.' : `Syntax error: ${cmdRes.error || cmdRes.output}`,
+          details: result.details,
           durationMs: Date.now() - startTime,
         };
       }

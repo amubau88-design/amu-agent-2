@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-23",
+  "timezone": "Europe/Berlin",
+  "embedded": {
+    "passed": true,
+    "checks": [
+      "path containment, secrets protection, denied network source, non-executing syntax verification, stale proposal protection",
+      "real embedded JSON and streaming completions, real token usage, context capacity enforcement",
+      "running inference cancellation and native worker recovery",
+      "real local model repair decision, review gate, controlled apply, backup preservation, corrected code behavior"
+    ],
+    "coreTaskState": "review",
+    "backend": "amu-embedded-llama.cpp",
+    "model": "qwen2.5:1.5b",
+    "recoveryCount": 1,
+    "nativeRss": 1302679552
+  },
+  "retention": {
+    "notChecked": [
+      "central-server.stderr.log",
+      "central-server.stdout.log"
+    ],
+    "missingFiles": [],
+    "changedFiles": [
+      "central-server.pid",
+      "secrets\\central-events.ndjson"
+    ],
+    "checkedAt": "2026-10-23T20:19:47.6559669+02:00",
+    "matchedFiles": 291
+  },
+  "additionalChecks": {
+    "typescriptBuild": "passed",
+    "compiledNativeInference": "passed",
+    "supervisorRecovery": "passed",
+    "lanFailClosed": "passed",
+    "adminPageRendering": "passed",
+    "fullAuthenticatedBrowserWorkflow": "not tested",
+    "liveStreaming": "HTTP 200 with DONE"
+  }
+}

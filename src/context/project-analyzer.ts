@@ -109,7 +109,7 @@ export class ProjectAnalyzer {
 
           // Regex search for API endpoints
           const routeRegex = /(?:app|router|server)\.(get|post|put|delete|patch)\(\s*['"`]([^'"`]+)['"`]/gi;
-          let match;
+          let match: RegExpExecArray | null;
           while ((match = routeRegex.exec(content)) !== null) {
             apiEndpoints.push({
               method: match[1].toUpperCase(),
@@ -121,7 +121,8 @@ export class ProjectAnalyzer {
           // Custom pathname checks (e.g. url.pathname === '/api/...')
           const customUrlRegex = /url\.pathname\s*===\s*['"`]([^'"`]+)['"`]/g;
           while ((match = customUrlRegex.exec(content)) !== null) {
-            if (!apiEndpoints.some(e => e.path === match[1])) {
+            const matchedPath = match[1];
+            if (!apiEndpoints.some(e => e.path === matchedPath)) {
               apiEndpoints.push({
                 method: 'GET/POST',
                 path: match[1],

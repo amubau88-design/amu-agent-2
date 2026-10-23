@@ -72,13 +72,13 @@ export class TaskQueueScheduler {
 
     try {
       const result = await agentOrchestrator.executeTask(pending.request);
-      if (pending.status !== 'cancelled') {
+      if (!pending.abortController.signal.aborted) {
         pending.status = 'completed';
         pending.result = result;
       }
     } catch (err: unknown) {
       const error = err as Error;
-      if (pending.status !== 'cancelled') {
+      if (!pending.abortController.signal.aborted) {
         pending.status = 'failed';
         pending.error = error.message;
       }

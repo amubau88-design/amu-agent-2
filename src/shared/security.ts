@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import type { CapabilityPermission } from './types.ts';
 
 export const DEFAULT_PROJECT_ROOT = path.resolve(process.cwd());
@@ -30,7 +31,8 @@ export class SecurityGuard {
 
     // Check denied paths first
     for (const denied of this.permissions.deniedPaths) {
-      if (resolvedPath.toLowerCase().startsWith(denied.toLowerCase())) {
+      const relative = path.relative(path.resolve(denied), resolvedPath);
+      if (relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) {
         throw new Error(`SECURITY VIOLATION: Path access denied to external project path: ${targetPath}`);
       }
     }
@@ -38,9 +40,12 @@ export class SecurityGuard {
     // Ensure path is within allowed project root
     let isAllowed = false;
     for (const allowed of this.permissions.allowedPaths) {
-      if (resolvedPath.toLowerCase().startsWith(path.resolve(allowed).toLowerCase())) {
-        isAllowed = true;
-        break;
+      const relative = path.relative(path.resolve(allowed), resolvedPath);
+      if (relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))) {
+        let existing = resolvedPath;
+        while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+        const realRelative = path.relative(fs.realpathSync(path.resolve(allowed)), fs.realpathSync(existing));
+        if (realRelative === '' || (!realRelative.startsWith('..' + path.sep) && realRelative !== '..' && !path.isAbsolute(realRelative))) { isAllowed = true; break; }
       }
     }
 

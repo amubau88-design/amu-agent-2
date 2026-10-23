@@ -1,3 +1,5 @@
+ > Historischer Stand vor eingebetteter AMU-Inferenz. Aktueller Betrieb und Einschränkungen: [amu-engine.md](amu-engine.md).
+
 # Zentraler AMU KI/API-Server — Stand 23.10.2026
 
 ## Betrieb und nachgewiesener Status

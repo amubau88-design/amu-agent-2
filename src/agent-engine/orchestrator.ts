@@ -133,18 +133,9 @@ Plan and perform required steps cleanly.`,
             statesVisited.push('REPAIR');
             auditTrail.push(logger.audit('REPAIR_ATTEMPT', { details: verifyRes.details }));
             
-            // Perform repair action: overwrite file with clean fixed content
-            const repairStart = Date.now();
-            await toolRegistry.executeTool('file_write', {
-              filePath: targetFile,
-              content: `export function divide(a: number, b: number): number {\n  if (b === 0) throw new Error('Division by zero');\n  return a / b;\n}\n`,
-            }, routeDecision.loadedTools);
-            totalToolExecutionTimeMs += (Date.now() - repairStart);
-
-            // Re-verify after repair
-            statesVisited.push('VERIFY');
-            const reVerifyRes = await taskVerifier.verify({ type: 'syntax', targetPath: targetFile });
-            verificationPassed = reVerifyRes.passed;
+            // Repair suggestions must pass through the controlled AMU Core review/apply flow.
+            verificationPassed = false;
+            finalOutput += '\nSyntax verification failed. Create a controlled repair proposal at /api/core/tasks; no source was overwritten.';
           } else {
             verificationPassed = true;
           }

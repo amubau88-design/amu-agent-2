@@ -1,4 +1,5 @@
 import type { AIRuntimeAdapter } from './interface.ts';
+import { AMUEmbeddedAdapter } from './embedded-adapter.ts';
 import { MockLocalRuntimeAdapter } from './mock-adapter.ts';
 import { OllamaRuntimeAdapter } from './ollama-adapter.ts';
 import { OpenAICompatibleRuntimeAdapter } from './openai-adapter.ts';
@@ -10,7 +11,7 @@ export class AIRuntimeManager {
   private startTime: number = Date.now();
 
   constructor() {
-    // Default mock adapter guarantees immediate E2E functionality
+    // Legacy adapters remain available explicitly. Production uses embedded inference.
     const mock = new MockLocalRuntimeAdapter();
     this.adapters.set(mock.id, mock);
 
@@ -20,7 +21,9 @@ export class AIRuntimeManager {
     const openai = new OpenAICompatibleRuntimeAdapter();
     this.adapters.set(openai.id, openai);
 
-    this.activeAdapterId = ollama.id;
+    const embedded = new AMUEmbeddedAdapter();
+    this.adapters.set(embedded.id, embedded);
+    this.activeAdapterId = embedded.id;
   }
 
   public registerAdapter(adapter: AIRuntimeAdapter): void {
@@ -43,14 +46,6 @@ export class AIRuntimeManager {
   }
 
   public async getStatus(): Promise<RuntimeStatus> {
-    // If currently on mock, check if Ollama is available and promote it
-    if (this.activeAdapterId === 'mock-local') {
-      const ollama = this.adapters.get('ollama');
-      if (ollama && await ollama.isHealthy()) {
-        this.activeAdapterId = 'ollama';
-      }
-    }
-
     const adapter = this.getActiveAdapter();
     const healthy = await adapter.isHealthy();
     const info = adapter.getModelInfo();
@@ -75,4 +70,3 @@ export class AIRuntimeManager {
 }
 
 export const aiRuntimeManager = new AIRuntimeManager();
-

@@ -1,6 +1,6 @@
-import { ToolCallResult, ToolDefinition } from '../shared/types.js';
-import { readFileTool, writeFileTool, deleteFileTool } from './file-tools.js';
-import { executeCmdTool, runTestTool, runBuildTool } from './cmd-tools.js';
+import type { ToolCallResult, ToolDefinition } from './shared/types.ts';
+import { readFileTool, writeFileTool, deleteFileTool } from './tool-runtime/file-tools.ts';
+import { executeCmdTool, runTestTool, runBuildTool } from './tool-runtime/cmd-tools.ts';
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<ToolCallResult>;
 

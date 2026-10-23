@@ -1,12 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import http from 'node:http';
+import { amuInference, type Message } from '../inference/engine.ts';
 import { logger } from '../shared/logger.ts';
 
 const CONVERSATIONS_DIR = path.resolve(process.cwd(), 'scratch', 'chat-history');
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:1.5b';
 
 export interface ChatMessage {
   id: string;
@@ -26,47 +24,10 @@ export interface Conversation {
   updatedAt: string;
 }
 
-// ─── Ollama helpers ──────────────────────────────────────────────────────────
-
-async function ollamaChat(
-  messages: { role: string; content: string }[],
-  onToken?: (token: string) => void
-): Promise<{ reply: string; durationMs: number }> {
-  const start = Date.now();
-  const body = JSON.stringify({
-    model: OLLAMA_MODEL,
-    messages,
-    stream: !!onToken,
-  });
-
-  return new Promise((resolve, reject) => {
-    const url = new URL('/api/chat', OLLAMA_URL);
-    const req = http.request(
-      { hostname: url.hostname, port: Number(url.port) || 11434, path: url.pathname, method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
-      (res) => {
-        let fullReply = '';
-        res.on('data', (chunk: Buffer) => {
-          const lines = chunk.toString().split('\n').filter(l => l.trim());
-          for (const line of lines) {
-            try {
-              const parsed = JSON.parse(line);
-              const token: string = parsed?.message?.content || '';
-              if (token) {
-                fullReply += token;
-                onToken?.(token);
-              }
-            } catch { /* ignore non-JSON lines */ }
-          }
-        });
-        res.on('end', () => resolve({ reply: fullReply, durationMs: Date.now() - start }));
-        res.on('error', reject);
-      }
-    );
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+// Direct AMU embedded inference; no HTTP model server required.
+async function localChat(messages: { role: string; content: string }[], onToken?: (token: string) => void): Promise<{ reply: string; durationMs: number }> {
+  const result = await amuInference.generate({ model: amuInference.status().model, messages: messages as Message[], maxTokens: 512, onChunk: onToken });
+  return { reply: result.content, durationMs: result.durationMs };
 }
 
 // ─── File helpers ────────────────────────────────────────────────────────────
@@ -109,6 +70,7 @@ async function listConversationsForUser(userId: string): Promise<Conversation[]>
 // ─── Chat Service ────────────────────────────────────────────────────────────
 
 class ChatService {
+  private pendingConversations = new Set<string>();
 
   async createConversation(userId: string, title: string, mode: 'general' | 'coder' = 'general'): Promise<Conversation> {
     const conv: Conversation = {
@@ -145,7 +107,14 @@ class ChatService {
     }
   }
 
-  async sendMessage(
+  async sendMessage(convId: string, userId: string, userMessage: string, maxUploadSizeMb = 15): Promise<{ userMsg: ChatMessage; assistantMsg: ChatMessage }> {
+    if (this.pendingConversations.has(convId)) throw new Error('Eine Nachricht dieser Konversation wird bereits verarbeitet.');
+    this.pendingConversations.add(convId);
+    try { return await this.sendMessageControlled(convId, userId, userMessage, maxUploadSizeMb); }
+    finally { this.pendingConversations.delete(convId); }
+  }
+
+  private async sendMessageControlled(
     convId: string,
     userId: string,
     userMessage: string,
@@ -171,12 +140,12 @@ class ChatService {
     };
     conv.messages.push(userMsg);
 
-    // Build Ollama message history (last 20 messages for context window)
+    // Build local message history (last 20 messages for context window)
     const historyMessages = conv.messages.slice(-20).map(m => ({
       role: m.role as string,
       content: m.content,
     }));
-    const ollamaMessages = [
+    const localMessages = [
       { role: 'system', content: systemPrompt },
       ...historyMessages,
     ];
@@ -184,12 +153,12 @@ class ChatService {
     let reply = '';
     let durationMs = 0;
     try {
-      const result = await ollamaChat(ollamaMessages);
+      const result = await localChat(localMessages);
       reply = result.reply || 'Ich konnte keine Antwort generieren.';
       durationMs = result.durationMs;
     } catch (err: unknown) {
-      logger.warn(`[CHAT] Ollama-Fehler: ${(err as Error).message}`);
-      reply = `[KI momentan nicht verfügbar – Ollama-Fehler: ${(err as Error).message}]`;
+      logger.warn(`[CHAT] AMU-Engine-Fehler: ${(err as Error).message}`);
+      reply = `[KI momentan nicht verfügbar – AMU-Engine-Fehler: ${(err as Error).message}]`;
     }
 
     const assistantMsg: ChatMessage = {

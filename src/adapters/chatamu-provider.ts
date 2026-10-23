@@ -12,8 +12,8 @@ export class ChatAMUProviderAdapter {
   private timeoutMs: number;
 
   constructor(options: ChatAMUProviderOptions = {}) {
-    this.baseUrl = (options.baseUrl || 'http://127.0.0.1:3000').replace(/\/$/, '');
-    this.apiKey = options.apiKey || 'amu-secret-key-2026';
+    this.baseUrl = (options.baseUrl || 'http://127.0.0.1:3030').replace(/\/$/, '');
+    this.apiKey = options.apiKey || process.env.AMU_API_KEY || '';
     this.timeoutMs = options.timeoutMs || 30000;
   }
 
@@ -75,6 +75,7 @@ export class ChatAMUProviderAdapter {
   }
 
   private async request<T>(endpoint: string, method: 'GET' | 'POST', body?: Record<string, unknown>): Promise<T> {
+    if (!this.apiKey) throw new Error('An AMU client API key is required');
     const headers: Record<string, string> = {
       'X-AMU-API-Key': this.apiKey,
       'Content-Type': 'application/json',

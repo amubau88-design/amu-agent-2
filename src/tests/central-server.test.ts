@@ -3,6 +3,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 const testDirectory = fs.mkdtempSync('scratch/central-test-');
 process.env.AMU_CENTRAL_STATE_DIR = testDirectory;
+process.env.AMU_CORE_STATE_DIR = testDirectory + '/core';
 const { createAmuApiServer } = await import('../amu-api/server.ts');
 const original = fs.readFileSync(testDirectory + '/central-access.json');
 const key = fs.readFileSync(testDirectory + '/central-admin-key.txt', 'utf8').trim();
@@ -32,9 +33,9 @@ try{
  const completion=await call('/v1/chat/completions',client.key,{model:'fixture-model',messages});assert.equal(completion.status,200);assert.equal((await completion.json() as any).choices[0].message.content,'OK');
  const stream=await call('/v1/chat/completions',client.key,{model:'fixture-model',messages,stream:true});assert.match(stream.headers.get('content-type')! as string,/text\/event-stream/);assert.match(await stream.text(),/data: \[DONE\]/);
  assert.equal((await call('/api/central/connection',key,{upstream:'https://api.openai.com/v1',model:'x'})).status,400);
- const concurrent=await Promise.all(Array.from({length:6},()=>call('/v1/chat/completions',client.key,{model:'fixture-model',messages})));assert.ok(concurrent.every(r=>r.status===200));assert.equal(peak,2);
+ const concurrent=await Promise.all(Array.from({length:6},()=>call('/v1/chat/completions',client.key,{model:'fixture-model',messages})));assert.equal(concurrent.filter(r=>r.status===200).length,1);assert.equal(concurrent.filter(r=>r.status===429).length,5);assert.equal(peak,1);
+ const rotated=await(await call('/api/central/rotate',key,{id:client.id})).json() as any;assert.equal((await call('/v1/models',client.key)).status,401);assert.equal((await call('/v1/models',rotated.key)).status,200);
  await call('/api/central/revoke',key,{id:client.id});assert.equal((await call('/v1/models',client.key)).status,401);
+ const adminRotation=await(await call('/api/central/admin-key/rotate',key,{})).json() as any;assert.equal((await call('/api/central/status',key)).status,401);assert.equal((await call('/api/central/status',adminRotation.key)).status,200);
  console.log('PASS: authentication, client isolation, model ACL, validation, complete messages, JSON inference, real SSE transport, cloud rejection, revocation, concurrency limit' );
 }finally{fs.writeFileSync(testDirectory + '/central-access.json',original);api.closeAllConnections();fake.closeAllConnections();await Promise.all([new Promise<void>(r=>api.close(()=>r())),new Promise<void>(r=>fake.close(()=>r()))]);}
-
-

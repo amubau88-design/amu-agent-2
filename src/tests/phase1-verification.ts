@@ -15,6 +15,8 @@ async function runPhase1TestSuite() {
   // Start HTTP Server on test port 3001
   const server = await startServer(3001);
   const apiKey = 'amu-secret-key-2026';
+  const tempFile = path.resolve(process.cwd(), 'scratch', 'core', 'workspaces', `phase1-debug-${Date.now()}.ts`);
+  await fs.mkdir(path.dirname(tempFile), { recursive: true });
 
   try {
     // ------------------------------------------------------------------------
@@ -81,7 +83,6 @@ async function runPhase1TestSuite() {
     // TEST D: Debug-Aufgabe mit Datei/Test (DEBUG Route, repair cycle)
     // ------------------------------------------------------------------------
     console.log('--- TEST D: Debug-Aufgabe (DEBUG & REPAIR) ---');
-    const tempFile = path.resolve(process.cwd(), 'src', 'temp_debug_test.ts');
     // Write invalid syntax directly using fs.writeFile
     const brokenCode = 'export function divide(a: number, b: number) {\n  const invalidSyntax = ;\n  return a / b;\n}\n';
     await fs.writeFile(tempFile, brokenCode, 'utf-8');

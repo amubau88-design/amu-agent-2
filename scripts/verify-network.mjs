@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+process.env.AMU_BIND_HOST='0.0.0.0';
+delete process.env.AMU_ALLOWED_CIDRS;delete process.env.AMU_TLS_CERT;delete process.env.AMU_TLS_KEY;
+const blocked=await import('../src/central/network.ts?blocked');
+assert.throws(()=>blocked.validateNetworkConfiguration(),/allowlist/);
+assert.throws(()=>blocked.tlsOptions(),/TLS/);
+process.env.AMU_ALLOWED_CIDRS='192.168.50.0/24';
+const restricted=await import('../src/central/network.ts?restricted');
+restricted.validateNetworkConfiguration();restricted.checkNetworkAccess('192.168.50.12');restricted.checkNetworkAccess('::ffff:192.168.50.12');
+assert.throws(()=>restricted.checkNetworkAccess('192.168.51.12'));
+assert.throws(()=>restricted.checkNetworkAccess('192.168.50.12',true),/Remote administration/);
+console.log('PASS: LAN fails closed without TLS and subnet allowlist; subnet isolation and remote admin denial');
