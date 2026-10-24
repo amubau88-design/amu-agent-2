@@ -1,0 +1,25 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
+const root=path.resolve(fs.mkdtempSync('scratch/session8-events-test-'));process.env.AMU_CENTRAL_STATE_DIR=root+'/access';process.env.AMU_CORE_STATE_DIR=root+'/core';process.env.AMU_BACKUP_PROJECT_ROOT=root;fs.mkdirSync(root+'/access');fs.mkdirSync(root+'/core');fs.writeFileSync(root+'/access/platform.json',JSON.stringify({requestTimeoutMs:1000}));
+const {createAmuApiServer}=await import('../amu-api/server.ts'),{amuInference}=await import('../inference/engine.ts'),{closeIdentityJournal}=await import('../central/idempotency.ts'),{stopAdmissionMonitoring}=await import('../central/service.ts'),{stopMonitoring}=await import('../core/monitoring.ts'),{streamTaskEvents}=await import('../core/task-events.ts');
+const server=createAmuApiServer();await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+(server.address() as any).port,key=fs.readFileSync(root+'/access/central-admin-key.txt','utf8').trim(),checks:string[]=[];
+async function call(route:string,body?:any,token=key){return fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});}
+async function app(name:string,role='developer'){const response=await call('/api/central/clients',{name,role,maxConcurrent:1});assert.equal(response.status,200);return response.json() as any;}
+function task(owner:string){const id=crypto.randomUUID(),value={id,owner,goal:'Read-only status fixture',files:[],state:'running',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),steps:[],proposals:[]};const file=root+'/core/'+id+'.task.json';fs.writeFileSync(file,JSON.stringify(value));return{id,value,file};}
+try{
+ const a=await app('Events A'),b=await app('Events B'),inference=await app('Inference','inference'),t=task(a.id),route='/api/core/tasks/'+t.id+'/events';
+ assert.equal((await call(route,undefined,b.key)).status,404);assert.equal((await call(route,undefined,inference.key)).status,403);
+ const response=await call(route,undefined,a.key);assert.equal(response.status,200);assert.match(response.headers.get('content-type')!,/event-stream/);const reader=response.body!.getReader(),first=new TextDecoder().decode((await reader.read()).value);assert.match(first,/event: task/);assert.ok(!first.includes(t.value.goal));
+ assert.equal((await call(route,undefined,a.key)).status,429);t.value.state='completed';t.value.updatedAt=new Date().toISOString();fs.writeFileSync(t.file,JSON.stringify(t.value));let tail='';for(;;){const next=await reader.read();if(next.done)break;tail+=new TextDecoder().decode(next.value);}assert.match(tail,/event: done/);
+ checks.push('authorized owner-only SSE snapshots, foreign task 404, inference role 403, per-client stream cap 429, terminal event and no prompt/source content');
+ const deadline=task(a.id),started=Date.now(),timeout=await(await call('/api/core/tasks/'+deadline.id+'/events',undefined,a.key)).text();assert.match(timeout,/event: timeout/);assert.match(timeout,/504/);assert.ok(Date.now()-started>=900);assert.equal(JSON.parse(fs.readFileSync(deadline.file,'utf8')).state,'running');
+ const revoked=task(a.id),live=await call('/api/core/tasks/'+revoked.id+'/events',undefined,a.key),liveReader=live.body!.getReader();await liveReader.read();await call('/api/central/revoke',{id:a.id});let revokedTail='';for(;;){const next=await liveReader.read();if(next.done)break;revokedTail+=new TextDecoder().decode(next.value);}assert.match(revokedTail,/"status":401/);
+ const changed=task(b.id),policy=await call('/api/core/tasks/'+changed.id+'/events',undefined,b.key),policyReader=policy.body!.getReader();await policyReader.read();await call('/api/central/clients/update',{id:b.id,models:[],rpm:60,maxTokens:512,maxConcurrent:1,scopes:[]});let policyTail='';for(;;){const next=await policyReader.read();if(next.done)break;policyTail+=new TextDecoder().decode(next.value);}assert.match(policyTail,/"status":403/);
+ checks.push('bounded observation deadline 504 leaves task untouched; live revocation ends stream 401; removed role/scope ends stream 403; no execution or replay');
+ const slow:any=new EventEmitter();slow.destroyed=false;slow.setHeader=()=>{};slow.flushHeaders=()=>{};slow.write=()=>false;slow.destroy=()=>{slow.destroyed=true;slow.emit('close');};slow.end=()=>{};
+ await streamTaskEvents(slow,'slow-fixture',1,1000,()=>0,()=>t.value as any);assert.equal(slow.destroyed,true);checks.push('slow consumer closes immediately without unbounded SSE buffering');
+ const evidence={passed:true,time:new Date().toISOString(),checks,fixtureOnly:true};fs.writeFileSync(root+'/verification.json',JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));
+}finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await amuInference.close();closeIdentityJournal();stopAdmissionMonitoring();stopMonitoring();}

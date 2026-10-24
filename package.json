@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -28,7 +28,8 @@
     "test:session6": "node --experimental-strip-types src/tests/session6-journal.test.ts && node --experimental-strip-types src/tests/session6-management.test.ts && node --experimental-strip-types src/tests/session5-failure.test.ts && node --experimental-strip-types src/tests/session5-remote.test.ts && node --experimental-strip-types src/tests/session6-diagnostics.test.ts",
     "backup:export": "node --experimental-strip-types scripts/encrypted-backup.mjs export",
     "rollback:manual": "node scripts/manual-rollback.mjs",
-    "test:session7": "node src/tests/session7-operations.test.mjs && node --experimental-strip-types src/tests/session7-acceptance.test.ts"
+    "test:session7": "node src/tests/session7-operations.test.mjs && node --experimental-strip-types src/tests/session7-acceptance.test.ts",
+    "test:session8": "node --experimental-strip-types src/tests/session8-management.test.mjs && node --experimental-strip-types src/tests/session8-events.test.ts"
   },
   "keywords": [],
   "author": "AMU Team",

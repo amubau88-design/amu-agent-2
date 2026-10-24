@@ -39,7 +39,7 @@ try{
   releases[0]();assert.equal((await first).status,200);await wait(()=>releases.length===2);releases[1]();assert.equal((await second).status,200);
  }finally{amuInference.generate=originalGenerate;}
  checks.push('deterministic bounded admission: one active, one queued, third request 429, queued work proceeds after release; no load test');
- const dashboard=await json('/api/central/dashboard');assert.equal(dashboard.status.version,'1.6.1');assert.ok(dashboard.workers.workers.length>=1);assert.equal(dashboard.status.clients.length,6);
+ const dashboard=await json('/api/central/dashboard');assert.equal(dashboard.status.version,JSON.parse(fs.readFileSync('package.json','utf8')).version);assert.ok(dashboard.workers.workers.length>=1);assert.equal(dashboard.status.clients.length,6);
  const html=await (await fetch(base+'/admin')).text(),script=html.match(/<script>([\s\S]*)<\/script>/)![1];new vm.Script(script);
  const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(item=>item[1]);assert.equal(new Set(ids).size,ids.length);for(const item of script.matchAll(/el\('([^']+)'\)/g))assert.ok(ids.includes(item[1]),item[1]);assert.ok(html.includes('operatingSummary'));
  const archive=await finish(await json('/api/central/backups/create',{scope:'full',includeModels:false}));const restored=await finish(await json('/api/central/backups/restore',{id:archive.id}));assert.equal(restored.activated,false);assert.equal(restored.authenticated,true);assert.ok(restored.databases.some((db:any)=>db.path.endsWith('request-identities.sqlite')&&db.integrity==='ok'));assert.equal(fs.readFileSync(root+'/scratch/core/preserved.db','utf8'),'CURRENT RUNTIME DATA');

@@ -11,6 +11,7 @@ import { handleApiRequest } from './routes.ts';
 import { ApiError, authenticate, requireAdmin, centralRoute, health, requireScope } from '../central/service.ts';
 import { EngineError } from '../inference/models.ts';
 import { amuCore } from '../core/controller.ts';
+import {streamTaskEvents} from '../core/task-events.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { bindHost, tlsOptions, validateNetworkConfiguration, checkNetworkAccess } from '../central/network.ts';
 import { requireRole } from '../central/permissions.ts';
@@ -53,6 +54,10 @@ export function createAmuApiServer(): http.Server {
       }
       if (pathname.startsWith('/api/core/')) {
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);
+        if(req.method==='GET'&&/^\/api\/core\/tasks\/[a-f0-9-]+\/events$/.test(pathname)){
+          const id=pathname.split('/').at(-2)!,initialHash=client.hash;
+          await streamTaskEvents(res,client.id,client.maxConcurrent||1,platform.requestTimeoutMs,()=>!client.enabled||client.revokedAt||client.hash!==initialHash?401:client.admin||(client.role==='developer'&&(!client.scopes||client.scopes.includes('core:tasks')))?0:403,()=>amuCore.get(id,client.id,client.admin));return;
+        }
         if(req.method==='POST'&&(pathname==='/api/core/tasks'||pathname.endsWith('/resume'))&&client.models.length&&!client.models.includes(amuInference.status().model))throw new ApiError(403,'Active model is outside this client model grant');
         const controller = new AbortController();
         const disconnect = () => { if (!res.writableEnded) controller.abort(); };
