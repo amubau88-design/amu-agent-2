@@ -1,0 +1,28 @@
+# Template only: provision node.json, weights and TLS first; no listener is enabled by this file.
+[Unit]
+Description=AMU-Agent-2 authenticated TLS inference worker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=amu
+Group=amu
+WorkingDirectory=/opt/AMU-Agent-2
+Environment=AMU_SUPERVISOR_ROLE=remote-worker
+ExecStart=/usr/bin/node /opt/AMU-Agent-2/scripts/supervise.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/AMU-Agent-2/scratch
+
+[Install]
+WantedBy=multi-user.target

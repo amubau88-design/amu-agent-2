@@ -16,14 +16,14 @@ const token=crypto.randomUUID();let locked=false;
 const bindHost=workerConfiguration?.host||process.env.AMU_BIND_HOST||'127.0.0.1';const probeHost=bindHost==='0.0.0.0'?'127.0.0.1':bindHost==='::'?'::1':bindHost;const port=workerConfiguration?.port||Number(process.env.PORT)||3030;
 await new Promise((resolve,reject)=>{const socket=net.createConnection({host:probeHost,port});socket.setTimeout(1500);socket.once('connect',()=>{socket.destroy();reject(Error('AMU API port is already in use; no existing service stopped'));});socket.once('error',e=>{socket.destroy();if(e.code==='ECONNREFUSED')resolve();else reject(e);});socket.once('timeout',()=>{socket.destroy();reject(Error('AMU port availability could not be established'));});});
 for(let attempt=0;attempt<2;attempt++){
- try{const fd=fs.openSync(lockFile,'wx');fs.writeFileSync(fd,JSON.stringify({pid:process.pid,root,token,startedAt:new Date().toISOString()}));fs.closeSync(fd);locked=true;break;}
+ try{const fd=fs.openSync(lockFile,'wx');fs.writeFileSync(fd,JSON.stringify({pid:process.pid,root,role,token,startedAt:new Date().toISOString()}));fs.closeSync(fd);locked=true;break;}
  catch(e){if(e.code!=='EEXIST')throw e;const previous=JSON.parse(fs.readFileSync(lockFile,'utf8'));if(previous.root!==root||!Number.isInteger(previous.pid)||alive(previous.pid))throw Error('AMU startup lock belongs to a running or unknown process');fs.unlinkSync(lockFile);}
 }
 if(!locked)throw Error('AMU startup lock could not be acquired');
 fs.writeFileSync(pidFile,String(process.pid));
 let child,stopping=false,heartbeat=Date.now(),failures=[],restartTimer,killTimer,plannedRestart=false,nonRestartable=false,mode='starting';
 let snapshotWarning=false;
-function snapshot(attempt=0){const data={supervisorPid:process.pid,apiPid:child?.pid||null,mode,restartsInWindow:failures.length,heartbeatAt:new Date(heartbeat).toISOString(),updatedAt:new Date().toISOString(),root};try{fs.writeFileSync(statusFile+'.tmp',JSON.stringify(data,null,2));fs.renameSync(statusFile+'.tmp',statusFile);snapshotWarning=false;}catch(error){if(attempt<3)setTimeout(()=>snapshot(attempt+1),100).unref();else if(!snapshotWarning){snapshotWarning=true;console.error('AMU operating-status snapshot unavailable:',error.code);}}}
+function snapshot(attempt=0){const data={supervisorPid:process.pid,role,apiPid:child?.pid||null,mode,restartsInWindow:failures.length,heartbeatAt:new Date(heartbeat).toISOString(),updatedAt:new Date().toISOString(),root};try{fs.writeFileSync(statusFile+'.tmp',JSON.stringify(data,null,2));fs.renameSync(statusFile+'.tmp',statusFile);snapshotWarning=false;}catch(error){if(attempt<3)setTimeout(()=>snapshot(attempt+1),100).unref();else if(!snapshotWarning){snapshotWarning=true;console.error('AMU operating-status snapshot unavailable:',error.code);}}}
 function journal(kind,details={}){const file=path.join(state,'supervisor.ndjson');if(fs.existsSync(file)&&fs.statSync(file).size>1048576)fs.renameSync(file,file+'.previous');try{fs.appendFileSync(file,JSON.stringify({time:new Date().toISOString(),kind,...details})+'\n');}catch(error){console.error('AMU supervisor journal unavailable:',error.code);}snapshot();if(process.connected)process.send?.({type:kind,...details});}
 function launch(){
  heartbeat=Date.now();mode='starting';

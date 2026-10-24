@@ -1,0 +1,263 @@
+{
+  "session": 6,
+  "date": "2026-10-24",
+  "version": "1.6.0",
+  "baseCommit": "21c5272",
+  "beforeBackup": {
+    "id": "b2cc5d75-7876-4868-b6b7-b909024a2277",
+    "createdAt": "2026-10-23T23:37:00.518Z",
+    "scope": "full",
+    "includesModels": true,
+    "encrypted": true,
+    "cipher": "AES-256-GCM",
+    "keySource": "local-recovery-key",
+    "files": 203,
+    "bytes": 988786109
+  },
+  "build": {
+    "passed": true,
+    "command": "npm run build"
+  },
+  "dashboard": {
+    "syntaxPassed": true,
+    "controls": 143,
+    "missingReferences": 0
+  },
+  "tests": {
+    "journal": {
+      "passed": true,
+      "time": "2026-10-24T00:06:09.856Z",
+      "checks": [
+        "foreign SQLite database refused without modification",
+        "legacy JSON preserved and imported once in a transaction",
+        "indexed duplicate rejection persists after reopen",
+        "second live owner rejected",
+        "abrupt process exit preserves accepted identity; restart marks interrupted without replay",
+        "journal stores hashes and states, not prompts",
+        "offline rollback export refuses a live owner, writes a separate compatible file and leaves source unchanged"
+      ],
+      "summary": {
+        "storage": "sqlite",
+        "schemaVersion": 1,
+        "records": 3,
+        "capacity": 1000000,
+        "states": {
+          "completed": 1,
+          "interrupted": 2
+        }
+      }
+    },
+    "management": {
+      "passed": true,
+      "time": "2026-10-24T00:06:09.100Z",
+      "checks": [
+        "exact-name permanent revocation, cross-client denial, old key invalid; restore, rotation and reactivation cannot revive identity",
+        "effective gateway concurrency follows ready worker count and remains below configured ceiling",
+        "retention off by default; only verified scheduled candidates; stale plan refused; pin/manual/unknown/unverified/latest full points preserved; bitrot rejected before deletion and audit retained",
+        "authenticated archive containing corrupt SQLite is rejected by a bounded read-only worker before verification succeeds",
+        "new manifest and indexed SQLite state survive encrypted verify/isolated restore; current database not overwritten"
+      ],
+      "productionRestorePerformed": false
+    },
+    "diagnostics": {
+      "passed": true,
+      "time": "2026-10-24T00:03:52.633Z",
+      "checks": [
+        "missing configuration and refused connection produce readable stage-specific diagnostics without secrets",
+        "public endpoint rejected before connection; no automatic retries"
+      ],
+      "publicNetworkRequests": 0
+    },
+    "remoteNative": {
+      "passed": true,
+      "time": "2026-10-24T00:06:17.287Z",
+      "checks": [
+        "native remote node loads local GGUF; recovered accepted record becomes interrupted without replay",
+        "plain HTTP, public/metadata targets, wrong CA, wrong certificate pin, wrong node identity and wrong key rejected",
+        "real native generation via common gateway pool and pinned HTTPS SSE, usage/chunks match; persistent identity rejects second execution; journal has no prompts",
+        "remote credential replacement probes TLS/identity/model before commit; invalid replacement leaves previous access intact; retired credentials removed",
+        "remote registration bypasses local CPU budget; stopped connection removal leaves remote model under node ownership"
+      ],
+      "twoComputerTest": false,
+      "transport": "TLS loopback only",
+      "nativeBackend": "amu-embedded-llama.cpp",
+      "completionTokens": 8
+    },
+    "remoteFailure": {
+      "passed": true,
+      "time": "2026-10-24T00:02:38.051Z",
+      "checks": [
+        "disconnect during streaming aborts native fixture, returns failure, records terminal state and does not replay",
+        "node outage removes readiness; same authenticated identity reconnects after restart; persistent duplicate remains rejected across restart",
+        "node resource telemetry and configurable 1s deadline enforced; gateway receives explicit 504 without retry"
+      ],
+      "fixture": true,
+      "executions": 2
+    },
+    "remoteSupervisor": {
+      "passed": true,
+      "time": "2026-10-23T23:57:13.659Z",
+      "checks": [
+        "explicit remote-worker supervisor role starts native model over authenticated TLS",
+        "owned worker process termination causes bounded restart with same node identity and readiness",
+        "separate state directory preserves gateway supervisor ownership"
+      ],
+      "nativeLoads": 2
+    },
+    "schedulerRegression": {
+      "passed": true,
+      "time": "2026-10-23T23:56:57.942Z",
+      "checks": [
+        "arbitrary application connection profile contains no key; cross-client administration denied; archive invalidates old key and restoration issues a new key",
+        "HTTP Idempotency-Key prevents repeat execution and body conflicts, isolates clients, persists only hashes and states",
+        "overdue scheduled backup defers while busy, captures once at idle, authenticates encrypted archive, records compatible manifest; future schema rejected for activation, legacy flagged; production fixture database untouched and recovery key excluded"
+      ],
+      "realCloudCalls": 0,
+      "productionDataModified": false
+    },
+    "backupRegression": {
+      "passed": true,
+      "time": "2026-10-24T00:04:36.717Z",
+      "checks": [
+        "AES-GCM hides secrets and paths, opaque binary data roundtrip, wrong password/tamper/traversal rejected, existing restore never overwritten",
+        "unique client names, bounded HTTP concurrency, consolidated dashboard, admin separation, maintenance backup, verified isolated restore, one-time streaming download, encrypted import and re-verification",
+        "LAN profile fails closed, matching certificate/key import, saved network remains inactive until restart, no firewall/trust modifications"
+      ]
+    },
+    "multiClientRegression": {
+      "passed": true,
+      "command": "node --experimental-strip-types src/tests/session3-platform.test.ts"
+    },
+    "windowsSyntax": {
+      "passed": true,
+      "parsedFiles": 2,
+      "tasksInstalledOrModified": false
+    }
+  },
+  "developmentFailure": {
+    "test": "Initial session6-journal.test.ts",
+    "cause": "SQL insertion had six placeholders for five columns",
+    "corrected": true,
+    "finalTestPassed": true
+  },
+  "live": {
+    "time": "2026-10-24T00:08:14.840Z",
+    "health": {
+      "server": "AMU-Agent-2",
+      "version": "1.6.0",
+      "uptimeSeconds": 8.4554224,
+      "status": "ready",
+      "inferenceReady": true,
+      "maintenance": false,
+      "active": 0,
+      "queued": 0,
+      "engine": {
+        "backend": "amu-embedded-llama.cpp",
+        "state": "ready",
+        "ready": true,
+        "paused": false,
+        "model": "qwen2.5:1.5b",
+        "active": 0,
+        "queued": 0
+      }
+    },
+    "journal": {
+      "storage": "sqlite",
+      "schemaVersion": 1,
+      "records": 4,
+      "capacity": 1000000,
+      "states": {
+        "completed": 4
+      }
+    },
+    "workers": [
+      {
+        "id": "primary",
+        "transport": "private-process-ipc",
+        "enabled": true,
+        "ready": true,
+        "state": "ready",
+        "model": "qwen2.5:1.5b"
+      }
+    ],
+    "gateway": {
+      "active": 0,
+      "queued": 0,
+      "httpRequests": 1,
+      "httpLimit": 64,
+      "capacity": 16,
+      "concurrency": 1,
+      "configuredConcurrency": 2,
+      "policy": "bounded-priority-round-robin"
+    },
+    "clients": {
+      "total": 2,
+      "enabled": 2,
+      "permanentlyRevoked": 0
+    },
+    "network": {
+      "bindHost": "127.0.0.1",
+      "tls": false,
+      "allowedCidrs": [],
+      "remoteAdministration": false
+    },
+    "backupSchedule": {
+      "enabled": false,
+      "intervalMinutes": 1440,
+      "includeModels": true
+    },
+    "retention": {
+      "configuration": {
+        "enabled": false,
+        "automatic": false,
+        "keepLast": 7,
+        "maxAgeDays": 30
+      },
+      "candidates": 0,
+      "operations": 0
+    }
+  },
+  "clientLive": {
+    "time": "2026-10-24T00:02:05.977Z",
+    "json": {
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 8,
+        "total_tokens": 18
+      },
+      "queueWaitMs": 1,
+      "capacity": 1
+    },
+    "duplicateStatus": 409,
+    "sse": {
+      "reachable": true,
+      "tls": false,
+      "inferenceReady": true,
+      "models": [
+        "qwen2.5:1.5b"
+      ],
+      "chatTest": "SSE completed",
+      "twoComputerTest": "Only valid if this script is actually run on the other computer",
+      "model": "qwen2.5:1.5b"
+    },
+    "administrativeStatus": 403,
+    "legacyJournalUnchanged": true,
+    "twoComputerTest": false
+  },
+  "release": {
+    "implemented": true,
+    "locallyTested": true,
+    "twoComputerTested": false,
+    "linuxExecuted": false,
+    "productionNetworkAuthorized": false,
+    "automaticProductionRestoreEnabled": false,
+    "formalMultiServerProductionRelease": false
+  },
+  "blockers": [
+    "No reachable second host with TLS/identity/access was provided",
+    "Controlled production activation and atomic rollback remain unimplemented"
+  ],
+  "otherAmuProjectsModified": false,
+  "privateKeysInGit": false
+}

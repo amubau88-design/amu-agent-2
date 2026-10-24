@@ -1,5 +1,7 @@
 # AMU AI Engine 1.5.0 – Sitzung 5, 24.10.2026
 
+Historischer Stand. Aktuelle Funktionen und Freigabegrenzen: [Sitzung 6](session6-platform.md).
+
 Ausgangspunkt: sauberer Commit `4342793`, Version 1.4.0. Vor Änderungen wurde eine vollständige AES-256-GCM-Sicherung einschließlich Modellgewichten erstellt: `b965d360-fe2e-4368-8b85-371ae2519a99` (185 Dateien, 988.199.769 Bytes). Nur AMU-Agent-2 wurde bearbeitet. Private Zustände, Schlüssel, Gewichte und Testverzeichnisse bleiben außerhalb von Git.
 
 ## Tatsächlich implementiert

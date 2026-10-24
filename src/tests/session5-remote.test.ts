@@ -1,3 +1,4 @@
+import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -9,6 +10,8 @@ fs.mkdirSync(state+'/access');fs.writeFileSync(state+'/access/workers.json',JSON
 const {startRemoteNode}=await import('../inference/remote-node.ts');
 const {remoteJson,remoteRequest,validateRemote,storeRemoteCredentials}=await import('../inference/remote.ts');
 const {AMUWorkerPool}=await import('../inference/pool.ts');
+
+function journalRows(file:string){const db=new DatabaseSync(file+'.sqlite',{readOnly:true});try{return db.prepare('SELECT * FROM identities').all() as any[];}finally{db.close();}}
 const checks:string[]=[];
 const key=crypto.randomBytes(48).toString('base64url'),nodeId=crypto.randomUUID(),journal=state+'/jobs.json';
 const interruptedId=crypto.randomUUID();fs.writeFileSync(journal,JSON.stringify([{id:interruptedId,hash:'0'.repeat(64),state:'accepted',createdAt:new Date().toISOString()}]));
@@ -20,7 +23,7 @@ const connection={endpoint,nodeId,certificateSha256,credentialId:storeRemoteCred
 try{
  new vm.Script(fs.readFileSync('src/web-ui/public/admin.html','utf8').match(/<script>([\s\S]*)<\/script>/)![1]);
  assert.throws(()=>validateRemote({...connection,endpoint:'http://127.0.0.1:3443'}));assert.throws(()=>validateRemote({...connection,endpoint:'https://8.8.8.8:3443'}));assert.throws(()=>validateRemote({...connection,endpoint:'https://169.254.169.254'}));
- const health=await remoteJson(connection,'/worker/v1/health');assert.equal(health.journal.interrupted,1);assert.equal(health.engine.completed,0);assert.ok(health.engine.ready);checks.push('native remote node loads local GGUF; recovered accepted record becomes interrupted without replay');
+ const health=await remoteJson(connection,'/worker/v1/health');assert.equal(health.journal.interrupted,1);assert.equal(health.engine.completed,0);assert.ok(health.engine.ready);assert.ok(health.resources.logicalCpus>0);assert.equal(health.resources.requestTimeoutMs,120000);checks.push('native remote node loads local GGUF; recovered accepted record becomes interrupted without replay');
  await assert.rejects(remoteJson({...connection,certificateSha256:'0'.repeat(64)},'/worker/v1/health'));
  await assert.rejects(remoteJson({...connection,nodeId:crypto.randomUUID()},'/worker/v1/health'));
  await assert.rejects(remoteJson({...connection,credentialId:storeRemoteCredentials('x'.repeat(48),ca)},'/worker/v1/health'));
@@ -31,9 +34,9 @@ try{
  await pool.workerControl(worker.id,'start');let streamed='';
  const result=await pool.generate({model:config.model,messages:[{role:'user',content:'Say hello.'}],maxTokens:8,temperature:0,onChunk:text=>{streamed+=text;}});
  assert.ok(result.content.length>0);assert.equal(streamed,result.content);assert.ok(result.usage.completion_tokens>0);
- const entries=JSON.parse(fs.readFileSync(journal,'utf8')),completed=entries.find((e:any)=>e.state==='completed');assert.ok(completed);assert.equal(entries.length,2);
- const duplicate=await remoteRequest(connection,'/worker/v1/generate',{jobId:completed.id,model:config.model,messages:[{role:'user',content:'Do not run again'}],maxTokens:8});assert.equal(duplicate.statusCode,409);duplicate.resume();assert.equal(JSON.parse(fs.readFileSync(journal,'utf8')).length,2);
- assert.ok(!fs.readFileSync(journal,'utf8').includes('Say hello'));checks.push('real native generation via common gateway pool and pinned HTTPS SSE, usage/chunks match; persistent identity rejects second execution; journal has no prompts');
- await pool.workerControl(worker.id,'stop');await pool.remove(worker.id);assert.equal(pool.workers().length,1);assert.ok(node.engine.status().ready);checks.push('remote registration bypasses local CPU budget; stopped connection removal leaves remote model under node ownership');
+ const entries=journalRows(journal),completed=entries.find((e:any)=>e.state==='completed');assert.ok(completed);assert.equal(entries.length,2);
+ const duplicate=await remoteRequest(connection,'/worker/v1/generate',{jobId:completed.id,model:config.model,messages:[{role:'user',content:'Do not run again'}],maxTokens:8});assert.equal(duplicate.statusCode,409);duplicate.resume();assert.equal(journalRows(journal).length,2);
+ assert.ok(!fs.readFileSync(journal+'.sqlite','utf8').includes('Say hello'));checks.push('real native generation via common gateway pool and pinned HTTPS SSE, usage/chunks match; persistent identity rejects second execution; journal has no prompts');
+ await pool.workerControl(worker.id,'stop');const previousCredential=worker.remote!.credentialId;await assert.rejects(pool.replaceRemoteCredentials(worker.id,{key:'x'.repeat(48),ca}));assert.equal(pool.workers().find(w=>w.id===worker.id)!.remote!.credentialId,previousCredential);const updated=(await pool.replaceRemoteCredentials(worker.id,{key,ca}))!;assert.notEqual(updated.remote!.credentialId,previousCredential);assert.equal(fs.existsSync(state+'/access/remote-workers/'+previousCredential+'.json'),false);await pool.workerControl(worker.id,'start');await pool.workerControl(worker.id,'stop');const removed=await pool.remove(worker.id);assert.equal(removed.credentialsRemoved,true);checks.push('remote credential replacement probes TLS/identity/model before commit; invalid replacement leaves previous access intact; retired credentials removed');assert.equal(pool.workers().length,1);assert.ok(node.engine.status().ready);checks.push('remote registration bypasses local CPU budget; stopped connection removal leaves remote model under node ownership');
  const evidence={passed:true,time:new Date().toISOString(),checks,twoComputerTest:false,transport:'TLS loopback only',nativeBackend:health.engine.backend,completionTokens:result.usage.completion_tokens};fs.writeFileSync(state+'/verification.json',JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));
 }finally{await pool.close();await node.close();}

@@ -9,7 +9,7 @@ const file=path.join(directory,'node.json');
 if(process.argv[2]==='init'){
  fs.mkdirSync(directory,{recursive:true});if(fs.existsSync(file)||fs.existsSync(path.join(directory,'worker-key.txt')))throw Error('Existing node configuration will not be overwritten');
  const key=crypto.randomBytes(48).toString('base64url'),nodeId=crypto.randomUUID();
- const config={nodeId,keyHash:crypto.createHash('sha256').update(key).digest('hex'),host:'127.0.0.1',port:3443,allowedCidrs:[],certFile:'scratch/secrets/tls/server-cert.pem',keyFile:'scratch/secrets/tls/server-key.pem',model:'qwen2.5:1.5b',threads:2,contextSize:4096,maxMemoryMiB:4096,journalFile:path.relative(projectRoot,path.join(directory,'jobs.json'))};
+ const config={nodeId,keyHash:crypto.createHash('sha256').update(key).digest('hex'),host:'127.0.0.1',port:3443,allowedCidrs:[],certFile:'scratch/secrets/tls/server-cert.pem',keyFile:'scratch/secrets/tls/server-key.pem',model:'qwen2.5:1.5b',threads:2,contextSize:4096,maxMemoryMiB:4096,requestTimeoutMs:120000,journalFile:path.relative(projectRoot,path.join(directory,'jobs.json'))};
  fs.writeFileSync(file,JSON.stringify(config,null,2),{flag:'wx',mode:0o600});fs.writeFileSync(path.join(directory,'worker-key.txt'),key,{flag:'wx',mode:0o600});console.log(JSON.stringify({nodeId,configuration:file,keyFile:path.join(directory,'worker-key.txt'),started:false}));
 }else if(process.argv[2]==='start'){
  const config=JSON.parse(fs.readFileSync(file,'utf8'));let node;

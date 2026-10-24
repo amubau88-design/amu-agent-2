@@ -1,0 +1,28 @@
+# Template only: adapt user, Node binary and project path; not installed by Codex.
+[Unit]
+Description=AMU-Agent-2 AI/API gateway
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=amu
+Group=amu
+WorkingDirectory=/opt/AMU-Agent-2
+Environment=AMU_SUPERVISOR_ROLE=gateway
+ExecStart=/usr/bin/node /opt/AMU-Agent-2/scripts/supervise.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/AMU-Agent-2/scratch
+
+[Install]
+WantedBy=multi-user.target

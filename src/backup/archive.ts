@@ -19,13 +19,14 @@ export async function createArchive(root:string,output:string,passphrase:string,
  const salt=crypto.randomBytes(32),iv=crypto.randomBytes(12),key=keyFor(passphrase,salt),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
  const header=Buffer.from(magic+JSON.stringify({salt:salt.toString('base64'),iv:iv.toString('base64'),kdf:'scrypt-32768-8-1',cipher:'aes-256-gcm'})+'\n');cipher.setAAD(header);
  const temporary=output+'.partial';await fsp.mkdir(path.dirname(output),{recursive:true});const disk=await fsp.statfs(path.dirname(output));if(files.reduce((n,e)=>n+e.bytes+16384,0)+1024**3>disk.bavail*disk.bsize){key.fill(0);throw new EngineError(507,'Insufficient disk space for encrypted backup and system reserve');}const out=fs.createWriteStream(temporary,{flags:'wx',mode:0o600});let outError:Error|undefined;out.on('error',error=>{outError=error;cipher.destroy(error);});
- const pipe=(async()=>{await write(out,header);for await(const chunk of cipher)await write(out,chunk);await write(out,cipher.getAuthTag());out.end();await once(out,'finish');if(!out.closed)await once(out,'close');})();
+ const archiveHash=crypto.createHash('sha256');const writeArchive=async(data:Buffer)=>{archiveHash.update(data);await write(out,data);};
+ const pipe=(async()=>{await writeArchive(header);for await(const chunk of cipher)await writeArchive(chunk);await writeArchive(cipher.getAuthTag());out.end();await once(out,'finish');if(!out.closed)await once(out,'close');})();
  void pipe.catch(()=>{});
  const record=async(value:object)=>{const body=Buffer.from(JSON.stringify(value));const length=Buffer.alloc(4);length.writeUInt32BE(body.length);await write(cipher,length);await write(cipher,body);};
  try{
   if(manifest){const data=Buffer.from(JSON.stringify(manifest));if(files.some(e=>e.path==='.amu-backup-manifest.json'))throw new EngineError(409,'Reserved backup manifest path');await record({path:'.amu-backup-manifest.json',bytes:data.length,sha256:crypto.createHash('sha256').update(data).digest('hex')});await write(cipher,data);}
   for(const entry of files){await record(entry);const hash=crypto.createHash('sha256');let bytes=0;for await(const chunk of fs.createReadStream(path.join(root,entry.path))){hash.update(chunk);bytes+=chunk.length;await write(cipher,chunk);}if(bytes!==entry.bytes||hash.digest('hex')!==entry.sha256)throw new EngineError(409,'Source changed while creating backup: '+entry.path);}
-  await record({end:true,count:files.length+(manifest?1:0)});cipher.end();await pipe;if(outError)throw outError;const durable=await fsp.open(temporary,'r+');try{await durable.sync();}finally{await durable.close();}await fsp.rename(temporary,output);return {files:files.length+(manifest?1:0),bytes:(await fsp.stat(output)).size};
+  await record({end:true,count:files.length+(manifest?1:0)});cipher.end();await pipe;if(outError)throw outError;const durable=await fsp.open(temporary,'r+');try{await durable.sync();}finally{await durable.close();}await fsp.rename(temporary,output);return {files:files.length+(manifest?1:0),bytes:(await fsp.stat(output)).size,sha256:archiveHash.digest('hex')};
  }catch(error){cipher.destroy();out.destroy();await pipe.catch(()=>{});throw error;}finally{key.fill(0);}
 }
 

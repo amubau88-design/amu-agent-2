@@ -36,7 +36,7 @@ try{
  assert.equal((await call('/v1/chat/completions',body,restored.key,{'Idempotency-Key':'same-request'})).status,409);
  assert.equal((await call('/v1/chat/completions',{...body,max_tokens:5},restored.key,{'Idempotency-Key':'same-request'})).status,409);
  assert.equal((await call('/v1/chat/completions',body,second.key,{'Idempotency-Key':'same-request'})).status,200);assert.equal(executions,2);
- assert.ok(!fs.readFileSync(root+'/scratch/secrets/request-identities.json','utf8').includes('PRIVATE-REQUEST-MARKER'));checks.push('HTTP Idempotency-Key prevents repeat execution and body conflicts, isolates clients, persists only hashes and states');
+ assert.ok(!fs.readFileSync(root+'/scratch/secrets/request-identities.sqlite','utf8').includes('PRIVATE-REQUEST-MARKER'));checks.push('HTTP Idempotency-Key prevents repeat execution and body conflicts, isolates clients, persists only hashes and states');
  await tickBackupSchedule(()=>false);assert.match(backupScheduleStatus().lastError||'',/deferred/);assert.equal(backupStatus().archives.length,0);
  Date.now=()=>originalNow()+16*60000;await tickBackupSchedule(()=>true);Date.now=originalNow;
  await until(()=>!backupStatus().busy);await tickBackupSchedule(()=>true);await until(()=>!backupStatus().busy);await tickBackupSchedule(()=>true);

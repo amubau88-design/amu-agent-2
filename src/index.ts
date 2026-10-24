@@ -1,9 +1,10 @@
 import { startServer } from './amu-api/server.ts';
-import { initializeCentral } from './central/service.ts';
+import { initializeCentral,stopAdmissionMonitoring } from './central/service.ts';
 import { amuInference } from './inference/engine.ts';
 import { recordSystemEvent, monitoringStatus, stopMonitoring } from './core/monitoring.ts';
 import fs from 'node:fs';
 import { recoverInterruptedTasks } from './core/controller.ts';
+import {closeIdentityJournal} from './central/idempotency.ts';
 import {amuCore} from './core/controller.ts';
 import {startBackupScheduler,stopBackupScheduler} from './backup/scheduler.ts';
 
@@ -22,10 +23,10 @@ let stopping = false;
 async function shutdown(code: number) {
   if (stopping) return; stopping = true;
   clearInterval(heartbeat); recordSystemEvent('server_stopping', { code });
-  stopBackupScheduler();
+  stopBackupScheduler();stopAdmissionMonitoring();
   const force = setTimeout(() => process.exit(code), 8000); force.unref();
   server.close(); server.closeAllConnections();
-  await amuInference.close(); stopMonitoring();
+  await amuInference.close(); closeIdentityJournal(); stopMonitoring();
   try { if (fs.readFileSync(pidFile, 'utf8').trim() === String(process.pid)) fs.unlinkSync(pidFile); } catch {}
   process.exit(code);
 }

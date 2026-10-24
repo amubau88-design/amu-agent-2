@@ -47,3 +47,5 @@ node scripts/test-client-connection.mjs --chat
 Der erste Aufruf prüft Gesundheit und autorisierte Modelle. Der zweite führt einmalig einen Auftrag mit höchstens acht Ausgabetokens und einer neuen Idempotenz-ID aus. Beide senden Schlüssel nur im Authorization-Header und geben sie nicht aus. TLS-/CA-Prüfung bleibt aktiv; öffentliche Ziele werden vom Testhelfer abgewiesen. Ein erfolgreicher Aufruf auf Agent-2 selbst ist weiterhin kein Zwei-Computer-Nachweis. Das Helferskript gehört zu Agent-2; diese Sitzung ändert Agent-3 nicht.
 
 Weitere Inferenzserver werden getrennt als Worker registriert: [Sitzung-5-Anleitung](session5-platform.md). Gateway-Zugangsdaten und Worker-Zugangsdaten sind unterschiedliche Berechtigungen.
+
+Ab Version 1.6 enthält der Testhelfer strukturierte, verständliche Fehlerdiagnosen für Konfiguration, Verbindung, TLS, Client-Zugänge und Quoten, ohne Schlüssel auszugeben. Die aktualisierten Betriebsprofile und die Grenzen der produktiven Freigabe stehen im [Bericht zur Sitzung 6](session6-platform.md). Lokaler Test, Zwei-Computer-Abnahme und Produktionsfreigabe sind getrennte Nachweise.

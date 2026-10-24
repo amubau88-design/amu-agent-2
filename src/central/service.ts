@@ -2,7 +2,8 @@ import {amuCore} from '../core/controller.ts';
 import {loadNetworkProfile,saveNetworkProfile,certificates,importCertificate} from './network-profile.ts';
 import {backupStatus,startBackup,startRestore,backupFile,importBackup} from '../backup/manager.ts';
 import {backupScheduleStatus,configureBackupSchedule} from '../backup/scheduler.ts';
-import {claimRequestIdentity} from './idempotency.ts';
+import {retentionPlan,configureRetention,applyRetention,pinBackup} from '../backup/retention.ts';
+import {identityJournalStatus,claimRequestIdentity} from './idempotency.ts';
 import {pipeline} from 'node:stream/promises';
 import {maintenanceStatus} from './maintenance.ts';
 import {setGenerationPolicy} from '../inference/policy.ts';
@@ -29,7 +30,7 @@ const version=JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).v
 const directory = path.resolve(process.env.AMU_CENTRAL_STATE_DIR || 'scratch/secrets');
 fs.mkdirSync(directory, { recursive: true });
 const file = path.join(directory, 'central-access.json');
-export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number;archivedAt?:string };
+export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number;archivedAt?:string;revokedAt?:string };
 type Config = { provider?: 'embedded' | 'local-http'; upstream: string; model: string; clients: Client[] };
 const downloadTickets=new Map<string,{clientId:string;hash:string;path:string;expires:number}>();
 const hash = (key: string) => crypto.createHash('sha256').update(key).digest('hex');
@@ -54,7 +55,7 @@ export function authenticate(req: http.IncomingMessage): Client {
   const key = authorization?.startsWith('Bearer ') ? authorization.slice(7) : req.headers['x-amu-api-key'];
   if (typeof key !== 'string' || key.length > 512) throw new ApiError(401, 'API key required');
   const digest = hash(key);
-  const client = config.clients.find(c => c.enabled && c.hash.length === digest.length && crypto.timingSafeEqual(Buffer.from(c.hash), Buffer.from(digest)));
+  const client = config.clients.find(c => c.enabled && !c.revokedAt && c.hash.length === digest.length && crypto.timingSafeEqual(Buffer.from(c.hash), Buffer.from(digest)));
   if (!client) throw new ApiError(401, 'Invalid API key');
   clientObservations.set(client.id, { lastSeenAt: new Date().toISOString(), remoteAddress: req.socket.remoteAddress || 'unknown' });
   const minute = Math.floor(Date.now() / 60000);
@@ -66,20 +67,24 @@ export function authenticate(req: http.IncomingMessage): Client {
 export function requireAdmin(client: Client) { if (!client.admin) throw new ApiError(403, 'Administrator permission required'); }
 let active = 0;
 const limit = platform.gatewayConcurrency;
+function admissionLimit(){return config.provider==='local-http'?limit:Math.max(1,Math.min(limit,amuInference.workers().filter(w=>w.enabled&&w.status.ready&&!w.managing).length));}
+function drainAdmission(){while(queue.length&&active<admissionLimit()){const i=fairIndex(queue,x=>x.clientId,x=>x.priority,lastClient,turn++);const[next]=queue.splice(i,1);if(turn%2===1)lastClient=next.clientId;active++;next.grant();}}
+const admissionMonitor=setInterval(drainAdmission,500).unref();
+export const stopAdmissionMonitoring=()=>clearInterval(admissionMonitor);
 type Admission={clientId:string;priority:number;grant:()=>void};
 const queue:Admission[]=[];
 let lastClient='',turn=0;
 async function acquire(signal:AbortSignal,client:Client){
  if(signal.aborted)throw signal.reason;
- if(active<limit){active++;return;}
+ if(active<admissionLimit()&&!queue.length){active++;return;}
  if(queue.length>=platform.queueCapacity)throw new ApiError(429,'Inference queue full');
  await new Promise<void>((resolve,reject)=>{
  const item:Admission={clientId:client.id,priority:client.priority||0,grant:()=>{signal.removeEventListener('abort',cancel);resolve();}};
  const cancel=()=>{const i=queue.indexOf(item);if(i>=0)queue.splice(i,1);reject(signal.reason);};
- queue.push(item);signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();
+ queue.push(item);signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();else drainAdmission();
  });
 }
-function release(){if(queue.length){const i=fairIndex(queue,x=>x.clientId,x=>x.priority,lastClient,turn++);const [next]=queue.splice(i,1);if(turn%2===1)lastClient=next.clientId;next.grant();}else active--;}
+function release(){active=Math.max(0,active-1);drainAdmission();}
 export const clientScopes=['models:read','chat:write','core:tasks'];
 export function requireScope(client:Client,scope:string){if(!client.admin&&client.scopes!==undefined&&!client.scopes.includes(scope))throw new ApiError(403,'API scope denied: '+scope);}
 function validateClientOptions(body:any){
@@ -95,7 +100,7 @@ const nativeClientActive=new Map<string,number>();
 setGenerationPolicy(input=>{
  if(!input.clientId)return {settle:()=>{}};
  const client=config.clients.find(c=>c.id===input.clientId);
- if(!client||!client.enabled)throw new ApiError(401,'Client access revoked');
+ if(!client||!client.enabled||client.revokedAt)throw new ApiError(401,'Client access revoked');
  requireScope(client,input.source==='core'?'core:tasks':'chat:write');
  if(client.models.length&&!client.models.includes(input.model))throw new ApiError(403,'Model access denied');
  if(input.source==='core')input.maxTokens=Math.min(input.maxTokens||768,client.maxTokens||(client.admin?2048:512));
@@ -139,20 +144,23 @@ export async function health() {
   try { const r = await upstream('/models'); return { status: r.ok&&!maintenanceStatus().operation ? 'ready' : 'degraded', inferenceReady: r.ok&&!maintenanceStatus().operation, active, queued: queue.length }; }
   catch { return { status: 'degraded', inferenceReady: false, active, queued: queue.length }; }
 }
-async function statusPayload(){return { ...await health(), engine:amuInference.status(),requests:[...requests.values()], scheduler:{active,queued:queue.length,httpRequests:maintenanceStatus().activeRequests,httpLimit:platform.maxHttpRequests,capacity:platform.queueCapacity,concurrency:limit,policy:"bounded-priority-round-robin"}, platform, connection: { provider: config.provider || 'embedded', upstream: config.upstream, model: config.model }, clients: config.clients.map(({ hash: _, ...c }) => ({...c,role:roleOf(c),active:clientActive.get(c.id)||0,usage:usage(c.id),scopes:c.scopes??clientScopes,observation:clientObservations.get(c.id)||null})), resources: { memory: process.memoryUsage(), freeMemory: os.freemem(), totalMemory: os.totalmem(), cpus: os.cpus().length, cpuUsage: process.cpuUsage(), uptime: process.uptime() }, events };}
+async function statusPayload(){return { ...await health(), engine:amuInference.status(),requests:[...requests.values()], scheduler:{active,queued:queue.length,httpRequests:maintenanceStatus().activeRequests,httpLimit:platform.maxHttpRequests,capacity:platform.queueCapacity,concurrency:admissionLimit(),configuredConcurrency:limit,policy:"bounded-priority-round-robin"}, platform, connection: { provider: config.provider || 'embedded', upstream: config.upstream, model: config.model }, clients: config.clients.map(({ hash: _, ...c }) => ({...c,role:roleOf(c),active:clientActive.get(c.id)||0,usage:usage(c.id),scopes:c.scopes??clientScopes,observation:clientObservations.get(c.id)||null})), resources: { memory: process.memoryUsage(), freeMemory: os.freemem(), totalMemory: os.totalmem(), cpus: os.cpus().length, cpuUsage: process.cpuUsage(), uptime: process.uptime() }, events };}
 export async function centralRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, body: any, client: Client): Promise<boolean> {
-  if (pathname === '/api/client/status' && req.method === 'GET') { res.end(JSON.stringify({ id: client.id, name: client.name, scopes:client.scopes??clientScopes, usage:usage(client.id), server:{version,model:config.model,backend:config.provider==='local-http'?'local-http':amuInference.status().backend,uptimeSeconds:process.uptime()}, role: roleOf(client), enabled: client.enabled, models: client.models, limits: { rpm: client.rpm, maxTokens: client.maxTokens || (client.admin ? 2048 : 512), maxConcurrent: client.maxConcurrent || (client.admin ? 2 : 1), dailyTokenLimit:client.dailyTokenLimit||0,maxContextTokens:client.maxContextTokens||platform.contextSize,priority:client.priority||0 }, active: clientActive.get(client.id) || 0, requestsThisMinute: counters.get(client.id)?.minute === Math.floor(Date.now()/60000) ? counters.get(client.id)?.count : 0, observation: clientObservations.get(client.id), inferenceReady: (await health()).inferenceReady })); return true; }
+  if (pathname === '/api/client/status' && req.method === 'GET') { res.end(JSON.stringify({ id: client.id, name: client.name, scopes:client.scopes??clientScopes, usage:usage(client.id), server:{version,model:config.model,backend:config.provider==='local-http'?'local-http':amuInference.status().backend,uptimeSeconds:process.uptime()}, role: roleOf(client), enabled: client.enabled, models: client.models, limits: { rpm: client.rpm, maxTokens: client.maxTokens || (client.admin ? 2048 : 512), maxConcurrent: client.maxConcurrent || (client.admin ? 2 : 1), dailyTokenLimit:client.dailyTokenLimit||0,maxContextTokens:client.maxContextTokens||platform.contextSize,priority:client.priority||0 }, active: clientActive.get(client.id) || 0, requests:[...requests.values()].filter(r=>r.clientId===client.id), requestsThisMinute: counters.get(client.id)?.minute === Math.floor(Date.now()/60000) ? counters.get(client.id)?.count : 0, observation: clientObservations.get(client.id), inferenceReady: (await health()).inferenceReady })); return true; }
   if (pathname.startsWith('/api/central/')) {
     const operational = ['/api/central/monitoring','/api/central/status','/api/central/models','/api/central/engine/control','/api/central/requests/cancel','/api/central/logs','/api/central/windows/status','/api/central/workers','/api/central/workers/control','/api/central/dashboard'];
     if (operational.includes(pathname)) requireRole(client,['admin','operator']); else requireAdmin(client);
-    if(pathname==='/api/central/dashboard'&&req.method==='GET'){res.end(JSON.stringify({status:await statusPayload(),monitoring:{process:monitoringStatus(),engine:amuInference.status(),network:networkStatus(),operation:operatingStatus()},events:readSystemEvents(),workers:{workers:amuInference.workers(),capacity:amuInference.status().capacity},backups:client.admin?{...backupStatus(),schedule:backupScheduleStatus()}:undefined}));return true;}
+    if(pathname==='/api/central/dashboard'&&req.method==='GET'){res.end(JSON.stringify({status:await statusPayload(),monitoring:{process:monitoringStatus(),engine:amuInference.status(),network:networkStatus(),operation:operatingStatus()},events:readSystemEvents(),workers:{workers:amuInference.workers(),capacity:amuInference.status().capacity},identities:identityJournalStatus(),backups:client.admin?{...backupStatus(),schedule:backupScheduleStatus()}:undefined}));return true;}
     if(pathname==='/api/central/workers'&&req.method==='GET'){res.end(JSON.stringify({workers:amuInference.workers(),capacity:amuInference.status().capacity}));return true;}
     if(pathname==='/api/central/workers/register'&&req.method==='POST'){res.end(JSON.stringify(await amuInference.register(body)));return true;}
+    if(pathname==='/api/central/workers/remote-credentials'&&req.method==='POST'){res.end(JSON.stringify(await amuInference.replaceRemoteCredentials(body?.id,body)));return true;}
     if(pathname==='/api/central/workers/remote'&&req.method==='POST'){requireRole(client,['admin']);res.end(JSON.stringify(await amuInference.registerRemote(body)));return true;}
     if(pathname==='/api/central/workers/remove'&&req.method==='POST'){requireRole(client,['admin']);res.end(JSON.stringify(await amuInference.remove(body?.id)));return true;}
     if(pathname==='/api/central/clients/connection'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');const network=networkStatus(),lanReady=network.tls&&!['127.0.0.1','::1','localhost'].includes(network.bindHost);res.end(JSON.stringify({application:entry.name,clientId:entry.id,base_url:lanReady?'https://<Agent-2-Zertifikatsname-oder-IP>:3030/v1':'http://127.0.0.1:3030/v1',model:entry.models[0]||config.model,api_key:'<individuellen Schlüssel aus sicherem Speicher einsetzen>',stream:true,max_tokens:entry.maxTokens||512,request_timeout_seconds:platform.requestTimeoutMs/1000,automatic_generation_retries:0,tls:{requiredForRemote:true,verify:true,caFile:'amu-ca.pem',currentlyReadyForRemote:lanReady},status:{enabled:entry.enabled,archived:!!entry.archivedAt,lastSeen:clientObservations.get(entry.id)||null},note:'Loopback ist nur auf Agent-2 erreichbar. Zweiten Computer erst nach TLS-/CIDR-Einrichtung verbinden. Keine Schlüssel in Quellcode speichern.'}));return true;}
+    if(pathname==='/api/central/clients/enable'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');if(entry.revokedAt||entry.archivedAt)throw new ApiError(409,'Archived or permanently revoked identity cannot be enabled here');entry.enabled=true;save();record({action:'client_enabled',id:entry.id});res.end('{"ok":true}');return true;}
+    if(pathname==='/api/central/clients/revoke-permanently'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');if(body.confirmName!==entry.name)throw new ApiError(409,'Confirm the exact application name for permanent revocation');entry.enabled=false;entry.revokedAt=new Date().toISOString();entry.archivedAt=entry.revokedAt;entry.hash=hash(crypto.randomBytes(48).toString('base64url'));save();for(const controller of clientControllers.get(entry.id)||[])controller.abort(new ApiError(401,'Application permanently revoked'));for(const job of amuInference.status().requests.filter(j=>j.clientId===entry.id))amuInference.cancel(job.id);record({action:'client_permanently_revoked',id:entry.id});res.end(JSON.stringify({id:entry.id,permanentlyRevoked:true,usageRetained:true}));return true;}
     if(pathname==='/api/central/clients/archive'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin);if(!entry)throw new ApiError(404,'Application not found');entry.enabled=false;entry.archivedAt=new Date().toISOString();entry.hash=hash(crypto.randomBytes(48).toString('base64url'));save();for(const controller of clientControllers.get(entry.id)||[])controller.abort(new ApiError(401,'Application archived'));for(const job of amuInference.status().requests.filter(j=>j.clientId===entry.id))amuInference.cancel(job.id);record({action:'client_archived',id:entry.id});res.end(JSON.stringify({archived:true,usageRetained:true,id:entry.id}));return true;}
-    if(pathname==='/api/central/clients/restore'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin&&c.archivedAt);if(!entry)throw new ApiError(404,'Archived application not found');const key=crypto.randomBytes(32).toString('base64url');delete entry.archivedAt;entry.enabled=true;entry.hash=hash(key);save();record({action:'client_restored',id:entry.id});res.end(JSON.stringify({id:entry.id,key}));return true;}
+    if(pathname==='/api/central/clients/restore'&&req.method==='POST'){const entry=config.clients.find(c=>c.id===body?.id&&!c.admin&&c.archivedAt&&!c.revokedAt);if(!entry)throw new ApiError(404,'Archived application not found');const key=crypto.randomBytes(32).toString('base64url');delete entry.archivedAt;entry.enabled=true;entry.hash=hash(key);save();record({action:'client_restored',id:entry.id});res.end(JSON.stringify({id:entry.id,key}));return true;}
     if(pathname==='/api/central/workers/configure'&&req.method==='POST'){if(typeof body?.id!=='string')throw new ApiError(400,'Worker id required');const {id,...settings}=body;const worker=await amuInference.configure(id,settings);if(id==='primary'){config.model=worker.model;save();}res.end(JSON.stringify(worker));return true;}
     if(pathname==='/api/central/workers/control'&&req.method==='POST'){if(typeof body?.id!=='string'||!['start','stop','restart'].includes(body.action))throw new ApiError(400,'Worker id and action required');res.end(JSON.stringify(await amuInference.workerControl(body.id,body.action,body.allowDuplicateModel===true)));return true;}
     if(pathname==='/api/central/network'&&req.method==='GET'){res.end(JSON.stringify({active:networkStatus(),saved:loadNetworkProfile(),certificates:certificates(),restartRequiredForChanges:true,firewallModified:false,certificateTrustModified:false}));return true;}
@@ -161,6 +169,10 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
     if(pathname==='/api/central/backups/import'&&req.method==='POST'){res.end(JSON.stringify(await importBackup(req)));return true;}
     if(pathname==='/api/central/backups/download-ticket'&&req.method==='POST'){const archive=backupFile(body?.id);if(JSON.parse(fs.readFileSync(archive+'.json','utf8')).integrityVerified===false)throw new ApiError(409,'Verify imported backup before exporting it');for(const [key,ticket]of downloadTickets)if(ticket.expires<Date.now())downloadTickets.delete(key);if(downloadTickets.size>=1000)throw new ApiError(429,'Download ticket limit');const token=crypto.randomBytes(32).toString('base64url'),url='/api/central/backups/'+body.id+'/download';downloadTickets.set(token,{clientId:client.id,hash:client.hash,path:url,expires:Date.now()+60000});res.setHeader('Set-Cookie','AMUDownload='+token+'; HttpOnly; SameSite=Strict; Path='+url+'; Max-Age=60'+(networkStatus().tls?'; Secure':''));res.end(JSON.stringify({url,expiresIn:60}));return true;}
     if(pathname==='/api/central/backups'&&req.method==='GET'){res.end(JSON.stringify(backupStatus()));return true;}
+    if(pathname==='/api/central/backups/retention'&&req.method==='GET'){res.end(JSON.stringify(retentionPlan()));return true;}
+    if(pathname==='/api/central/backups/retention/configure'&&req.method==='POST'){res.end(JSON.stringify(configureRetention(body)));return true;}
+    if(pathname==='/api/central/backups/retention/apply'&&req.method==='POST'){res.end(JSON.stringify(await applyRetention(body?.confirmationHash)));return true;}
+    if(pathname==='/api/central/backups/pin'&&req.method==='POST'){res.end(JSON.stringify(pinBackup(body?.id,body?.pinned)));return true;}
     if(pathname==='/api/central/backups/schedule'&&req.method==='GET'){res.end(JSON.stringify(backupScheduleStatus()));return true;}
     if(pathname==='/api/central/backups/schedule'&&req.method==='POST'){res.end(JSON.stringify(configureBackupSchedule(body)));return true;}
     if(pathname==='/api/central/backups/create'&&req.method==='POST'){res.statusCode=202;res.end(JSON.stringify(startBackup(body||{})));return true;}
@@ -214,6 +226,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
       const entry = config.clients.find(c => c.id === body?.id && !c.admin);
       if (!entry) throw new ApiError(404, 'Client not found');
       if (body.role !== undefined && !['inference','operator','developer'].includes(body.role)) throw new ApiError(400,'Invalid client role');
+      if(entry.revokedAt)throw new ApiError(409,'Permanently revoked application cannot be reactivated; create a new identity');
       if(entry.archivedAt)throw new ApiError(409,'Restore archived application before editing it');
       if (!Array.isArray(body.models) || body.models.some((m: unknown) => typeof m !== 'string') || !Number.isInteger(body.rpm) || body.rpm < 1 || body.rpm > 600 || !Number.isInteger(body.maxTokens) || body.maxTokens < 1 || body.maxTokens > 2048 || !Number.isInteger(body.maxConcurrent) || body.maxConcurrent < 1 || body.maxConcurrent > 16) throw new ApiError(400, 'Invalid client limits');
       if(body.name!==undefined&&body.name.trim()!==entry.name&&config.clients.some(c=>c.id!==entry.id&&c.name.trim().normalize('NFKC').toLowerCase()===body.name.trim().normalize('NFKC').toLowerCase()))throw new ApiError(409,'Client name already exists');
@@ -276,7 +289,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   const heartbeat=setInterval(()=>{if(body.stream&&res.headersSent&&!res.writableEnded&&!res.destroyed)res.write(': keep-alive\n\n');},15000);heartbeat.unref();
   try {
     finishIdentity=claimRequestIdentity(client.id,req.headers['idempotency-key'],body);
-    await acquire(controller.signal,client); acquired = true;
+    const admissionStarted=Date.now();await acquire(controller.signal,client); acquired = true;res.setHeader('X-AMU-Queue-Wait-Ms',String(Date.now()-admissionStarted));res.setHeader('X-AMU-Gateway-Capacity',String(admissionLimit()));
     const request=requests.get(requestId);if(request)request.state='inference-submitted';
     if (!client.enabled) throw new ApiError(401, 'Client access revoked');
     requireScope(client,'chat:write');inferenceStarted=true;

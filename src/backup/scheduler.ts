@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {retentionPlan,applyRetention} from './retention.ts';
 import path from 'node:path';
 import {backupDirectory,backupStatus,startBackup,startRestore} from './manager.ts';
 import {writePrivateJson} from '../central/storage.ts';
@@ -20,7 +21,7 @@ export function configureBackupSchedule(input:unknown){if(state.lastJobId||state
 /** Persist intent before launch. An uncertain capture after a crash is never replayed immediately. */
 export async function tickBackupSchedule(idle:()=>boolean){if(ticking)return;ticking=true;try{
  const status=backupStatus();
- if(state.verificationJobId){const job=status.jobs.find(j=>j.id===state.verificationJobId);if(job?.state==='running')return;if(job?.state==='completed'){state.lastVerifiedBackupId=String((job.result as any)?.backupId);state.lastError=undefined;}else state.lastError=job?.error||'Verification interrupted; manually verify the archive';state.verificationJobId=undefined;save();}
+ if(state.verificationJobId){const job=status.jobs.find(j=>j.id===state.verificationJobId);if(job?.state==='running')return;if(job?.state==='completed'){state.lastVerifiedBackupId=String((job.result as any)?.backupId);state.lastError=undefined;const plan=retentionPlan();if(plan.configuration.enabled&&plan.configuration.automatic&&plan.candidates.length)await applyRetention(plan.confirmationHash);}else state.lastError=job?.error||'Verification interrupted; manually verify the archive';state.verificationJobId=undefined;save();}
  if(state.lastJobId){const job=status.jobs.find(j=>j.id===state.lastJobId);if(job?.state==='running')return;
   if(job?.state==='completed'){if(status.busy||!idle())return;try{state.verificationJobId=startRestore({id:(job.result as any).id},true).id;}catch{state.lastError='Scheduled archive created; automatic verification could not start';}}
   else state.lastError=job?.error||'Scheduled capture interrupted; existing databases were preserved';
@@ -29,7 +30,7 @@ export async function tickBackupSchedule(idle:()=>boolean){if(ticking)return;tic
  if(!state.configuration.enabled||!state.nextRunAt||Date.parse(state.nextRunAt)>Date.now())return;
  if(status.busy||!idle()){state.lastError='Scheduled backup deferred: inference, development task or another backup is active';state.nextRunAt=next(15);save();return;}
  state.lastRunAt=new Date().toISOString();state.nextRunAt=next(state.configuration.intervalMinutes);state.lastError='Capture intent recorded; if interrupted, inspect operation history';save();
- try{state.lastJobId=startBackup({scope:'full',includeModels:state.configuration.includeModels}).id;state.lastError=undefined;}catch(error){state.lastError=(error as Error).message;state.nextRunAt=next(15);}save();
+ try{state.lastJobId=startBackup({scope:'full',includeModels:state.configuration.includeModels,scheduled:true}).id;state.lastError=undefined;}catch(error){state.lastError=(error as Error).message;state.nextRunAt=next(15);}save();
  }finally{ticking=false;}}
 export function startBackupScheduler(idle:()=>boolean){if(timer)return;timer=setInterval(()=>{void tickBackupSchedule(idle).catch(()=>{state.lastError='Backup scheduler failed; check storage and operation history';});},30000).unref();void tickBackupSchedule(idle).catch(()=>{});}
 export function stopBackupScheduler(){if(timer)clearInterval(timer);timer=undefined;}
