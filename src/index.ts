@@ -1,3 +1,4 @@
+import './backup/rollback-guard.ts';
 import { startServer } from './amu-api/server.ts';
 import { initializeCentral,stopAdmissionMonitoring } from './central/service.ts';
 import { amuInference } from './inference/engine.ts';

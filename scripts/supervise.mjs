@@ -26,6 +26,7 @@ let snapshotWarning=false;
 function snapshot(attempt=0){const data={supervisorPid:process.pid,role,apiPid:child?.pid||null,mode,restartsInWindow:failures.length,heartbeatAt:new Date(heartbeat).toISOString(),updatedAt:new Date().toISOString(),root};try{fs.writeFileSync(statusFile+'.tmp',JSON.stringify(data,null,2));fs.renameSync(statusFile+'.tmp',statusFile);snapshotWarning=false;}catch(error){if(attempt<3)setTimeout(()=>snapshot(attempt+1),100).unref();else if(!snapshotWarning){snapshotWarning=true;console.error('AMU operating-status snapshot unavailable:',error.code);}}}
 function journal(kind,details={}){const file=path.join(state,'supervisor.ndjson');if(fs.existsSync(file)&&fs.statSync(file).size>1048576)fs.renameSync(file,file+'.previous');try{fs.appendFileSync(file,JSON.stringify({time:new Date().toISOString(),kind,...details})+'\n');}catch(error){console.error('AMU supervisor journal unavailable:',error.code);}snapshot();if(process.connected)process.send?.({type:kind,...details});}
 function launch(){
+ if(fs.existsSync(path.join(root,'scratch/manual-rollback.lock'))){journal('manual_rollback_requires_recovery');finish(1);return;}
  heartbeat=Date.now();mode='starting';
  const args=role==='remote-worker'?['--experimental-strip-types','scripts/remote-worker.mjs','start']:['--experimental-strip-types','src/index.ts'];
  const instance=spawn(process.execPath,args,{cwd:root,windowsHide:true,stdio:['ignore','inherit','inherit','ipc'],env:{...process.env,AMU_SUPERVISED:'true'}});child=instance;journal('child_started',{pid:instance.pid,role});

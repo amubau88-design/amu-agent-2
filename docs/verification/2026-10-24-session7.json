@@ -1,0 +1,153 @@
+{
+  "session": 7,
+  "version": "1.6.1",
+  "baseCommit": "7803d2c",
+  "time": "2026-10-24T00:58:57.962Z",
+  "build": {
+    "typecheck": true,
+    "compile": true
+  },
+  "operations": {
+    "passed": true,
+    "time": "2026-10-24T00:55:51.647Z",
+    "checks": [
+      "private domain resolution is pinned; mixed/public DNS and remote HTTP rejected; real local TLS validates original domain SAN and rejects wrong name",
+      "ciphertext export is verified, non-overwriting, excludes recovery keys and refuses bitrot/unverified sources; separate-storage path tested only inside fixture",
+      "manual code rollback: live-process refusal, reviewed hash, stale preview refusal, apply/undo, interrupted rename recovery, startup barrier, incompatible dependency refusal; current runtime state unchanged"
+    ],
+    "productiveRollbackPerformed": false,
+    "twoComputerTest": false
+  },
+  "acceptance": {
+    "passed": true,
+    "time": "2026-10-24T00:54:07.661Z",
+    "checks": [
+      "five independent application names, invalid-key 401, client/admin and client/client isolation, safe profiles with actual listening port",
+      "deterministic bounded admission: one active, one queued, third request 429, queued work proceeds after release; no load test",
+      "dashboard payload, unique controls, executable page script; encrypted full fixture backup, authenticated isolated restore with SQLite integrity, current state unchanged"
+    ],
+    "fixtureOnly": true
+  },
+  "live": {
+    "passed": true,
+    "time": "2026-10-24T00:55:15.249Z",
+    "version": "1.6.1",
+    "checks": [
+      "controlled supervised API restart: PID changed and native readiness recovered",
+      "existing Agent-3 key: authorized models and genuine local native JSON completion",
+      "genuine native SSE content, usage and DONE",
+      "missing key 401; inference client cannot access dashboard (403)",
+      "central access configuration byte-identical after restart and acceptance"
+    ],
+    "api": {
+      "ready": true,
+      "base": "http://127.0.0.1:3030",
+      "backend": "amu-embedded-llama.cpp",
+      "jsonStatus": 200,
+      "sseStatus": 200,
+      "jsonCompletionTokens": 10
+    },
+    "workers": [
+      {
+        "id": "primary",
+        "transport": "private-process-ipc",
+        "model": "qwen2.5:1.5b",
+        "ready": true,
+        "threads": 4
+      }
+    ],
+    "clients": {
+      "total": 2,
+      "applications": 1,
+      "enabledApplications": 1
+    },
+    "scheduler": {
+      "active": 0,
+      "queued": 0,
+      "httpRequests": 1,
+      "httpLimit": 64,
+      "capacity": 16,
+      "concurrency": 1,
+      "configuredConcurrency": 2,
+      "policy": "bounded-priority-round-robin"
+    },
+    "network": {
+      "bindHost": "127.0.0.1",
+      "tls": false,
+      "allowedCidrs": [],
+      "remoteAdministration": false
+    },
+    "automaticBackup": false,
+    "twoComputerTest": false
+  },
+  "backup": {
+    "passed": true,
+    "time": "2026-10-24T00:58:06.357Z",
+    "archive": {
+      "id": "6582d70f-bacd-446d-b6da-8ed06bee6f77",
+      "createdAt": "2026-10-24T00:58:02.735Z",
+      "scope": "full",
+      "origin": "manual",
+      "includesModels": false,
+      "encrypted": true,
+      "cipher": "AES-256-GCM",
+      "keySource": "local-recovery-key",
+      "files": 230,
+      "bytes": 2834220,
+      "sha256": "c0ed1c3e84f44244d19c7b598cb03e0deece2e273591fd8b2b4c911c186db256"
+    },
+    "restore": {
+      "files": 230,
+      "bytes": 2802480,
+      "authenticated": true,
+      "databases": [
+        {
+          "path": "scratch/secrets/request-identities.sqlite",
+          "integrity": "ok"
+        }
+      ],
+      "backupId": "6582d70f-bacd-446d-b6da-8ed06bee6f77",
+      "directory": "scratch\\restores\\79887913-9a16-401a-88ef-9c715bffa931",
+      "activated": false,
+      "compatibility": {
+        "compatible": true,
+        "sourceVersion": "1.6.1",
+        "currentVersion": "1.6.1",
+        "schemaVersion": 2,
+        "reason": "Compatible archive schema; inspect restored configuration before activation"
+      },
+      "message": "Verified recovery copy; current installation was not overwritten; incompatible archives require migration before activation"
+    },
+    "modelsPreservedInExistingVerifiedArchive": "83d5fc61-9352-4770-b740-c9d4e9254167",
+    "externalMediumProvided": false
+  },
+  "export": {
+    "actualVerifiedArchive": "6582d70f-bacd-446d-b6da-8ed06bee6f77",
+    "sha256": "c0ed1c3e84f44244d19c7b598cb03e0deece2e273591fd8b2b4c911c186db256",
+    "target": "scratch/backups/exports (same local disk; not an external medium)",
+    "passed": true
+  },
+  "dashboard": {
+    "browserLogin": true,
+    "visibleVersion": "1.6.1",
+    "ready": true,
+    "screenshot": "scratch/session7-dashboard.png (ignored local evidence)"
+  },
+  "notPerformed": [
+    "productive two-computer/LAN connection",
+    "external physical backup-medium test",
+    "productive code rollback or database activation",
+    "physical power-loss test",
+    "Linux deployment",
+    "high-user-count load test"
+  ],
+  "scope": {
+    "otherAmuProjectsModified": false,
+    "firewallChanged": false,
+    "certificateStoreChanged": false,
+    "modelWeightsChanged": false,
+    "centralAccessConfigurationChanged": false,
+    "automaticBackupEnabled": false
+  },
+  "developmentPausedAfterCompletion": true
+}
