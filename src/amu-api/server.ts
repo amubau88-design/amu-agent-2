@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { handleApiRequest } from './routes.ts';
-import { ApiError, authenticate, requireAdmin, centralRoute, health, requireScope } from '../central/service.ts';
+import { ApiError, authenticate, requireAdmin, centralRoute, health, requireScope,unauthenticatedBrowserRoute } from '../central/service.ts';
 import { EngineError } from '../inference/models.ts';
 import { amuCore } from '../core/controller.ts';
 import {streamTaskEvents} from '../core/task-events.ts';
@@ -36,8 +36,12 @@ export function createAmuApiServer(): http.Server {
       }
       if(req.method==='GET'&&['/ready','/readyz','/v1/ready'].includes(pathname)){const state=await health();res.statusCode=state.inferenceReady?200:503;res.end(JSON.stringify(state));return;}
       if (req.method === 'GET' && pathname === '/health') { res.end(JSON.stringify(await health())); return; }
+      if(req.method==='POST'&&['/api/auth/owner-login','/api/auth/logout'].includes(pathname)){
+        let text='';for await(const chunk of req){text+=chunk;if(Buffer.byteLength(text)>4096)throw new ApiError(413,'Authentication body exceeds limit');}
+        let body;try{body=JSON.parse(text||'{}');}catch{throw new ApiError(400,'Invalid authentication JSON');}unauthenticatedBrowserRoute(req,res,pathname,body);return;
+      }
       const client = authenticate(req);
-      const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;if(!maintenanceStatus().operation&&!pathname.startsWith('/api/central/backups'))observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);};res.once('finish',observe);res.once('close',observe);
+      const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;if(!maintenanceStatus().operation&&!pathname.startsWith('/api/central/backups')){observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);if(client.credentialId)observeRequest('key:'+client.credentialId,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);}};res.once('finish',observe);res.once('close',observe);
       checkNetworkAccess(req.socket.remoteAddress || '', client.admin);
       const maintenanceRead=!!maintenanceStatus().operation&&req.method==='GET'&&['/api/client/status','/api/central/dashboard'].includes(pathname);
       if(!pathname.startsWith('/api/central/backups')&&!maintenanceRead){const leave=enterRequest();res.once('finish',leave);res.once('close',leave);}

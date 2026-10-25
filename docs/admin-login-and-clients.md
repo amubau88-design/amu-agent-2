@@ -1,8 +1,10 @@
 # Anmelden und eine Anwendung verbinden
 
+Neu ab Version 1.7.0: Ist der Administrator-Schlüssel nicht verfügbar, `scripts/AMU-Administratorzugang.cmd` öffnen und den geprüften lokalen Einmalcode im Dashboard einsetzen. Details: [Sitzung 9](session9-platform.md). Zusätzliche benannte Modell-/Chat-Schlüssel sind im neuen Bereich API-Schlüsselverwaltung verfügbar.
+
 1. Auf dem Agent-2-Rechner `http://127.0.0.1:3030/admin` öffnen. Vor der Anmeldung zeigt die Seite bereits, ob die API erreichbar und die KI bereit ist. „Anmeldung erforderlich“ bedeutet keinen Serverausfall.
 2. Den **vorhandenen** Administrator-Schlüssel aus der geschützten lokalen Datei `scratch/secrets/central-admin-key.txt` in das Passwortfeld einsetzen und „Verbinden / Status laden“ wählen. Den Inhalt nicht in Chat, Quellcode, Git oder allgemeine Protokolle kopieren. Es gibt keinen erforderlichen Schlüssel-Reset.
-3. Nach erfolgreicher Anmeldung stehen Benutzername, Rolle, Aktualisierungszeit und die echten Ressourcenwerte auf der Seite. Der Schlüssel bleibt nur im Arbeitsspeicher dieses Browser-Tabs. Nach Neuladen oder „Abmelden / Schlüssel vergessen“ erneut anmelden. Es wird bewusst kein Schlüssel in Local Storage oder einer URL gespeichert.
+3. Nach erfolgreicher Anmeldung stehen Benutzername, Rolle, Aktualisierungszeit und die echten Ressourcenwerte auf der Seite. Der Schlüssel bleibt nur im Arbeitsspeicher dieses Browser-Tabs. Mit „Mit vorhandenem Admin-Schlüssel geschützte Sitzung öffnen“ bleibt die Anmeldung über ein maximal acht Stunden gültiges HttpOnly-Cookie auch nach Neuladen bestehen. Nach Abmelden erneut anmelden. Es wird bewusst kein Schlüssel in Local Storage oder einer URL gespeichert.
 
 | Anzeige | Bedeutung und nächster Schritt |
 |---|---|

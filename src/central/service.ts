@@ -1,4 +1,6 @@
 import {amuCore} from '../core/controller.ts';
+import {browserPrincipal,ownerLogin,logoutBrowser,createBrowserSession} from './browser-auth.ts';
+import {createKey,changeKey,listKeys,matchKey,keyActive,managedKey,expiration,type ManagedKey} from './api-keys.ts';
 import {loadNetworkProfile,saveNetworkProfile,certificates,importCertificate} from './network-profile.ts';
 import {backupStatus,startBackup,startRestore,backupFile,importBackup} from '../backup/manager.ts';
 import {backupScheduleStatus,configureBackupSchedule} from '../backup/scheduler.ts';
@@ -30,7 +32,7 @@ const version=JSON.parse(fs.readFileSync(path.resolve('package.json'),'utf8')).v
 const directory = path.resolve(process.env.AMU_CENTRAL_STATE_DIR || 'scratch/secrets');
 fs.mkdirSync(directory, { recursive: true });
 const file = path.join(directory, 'central-access.json');
-export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number;archivedAt?:string;revokedAt?:string;keyId?:string;keyCreatedAt?:string };
+export type Client = { id: string; name: string; hash: string; admin: boolean; role?: ClientRole; enabled: boolean; models: string[]; rpm: number; maxTokens?: number; maxConcurrent?: number; scopes?: string[]; dailyTokenLimit?: number; priority?: number; maxContextTokens?:number;archivedAt?:string;revokedAt?:string;keyId?:string;keyCreatedAt?:string;keyName?:string;keyExpiresAt?:string|null;credentialId?:string;applicationMaxConcurrent?:number };
 type Config = { provider?: 'embedded' | 'local-http'; upstream: string; model: string; clients: Client[] };
 const downloadTickets=new Map<string,{clientId:string;hash:string;path:string;expires:number}>();
 const hash = (key: string) => crypto.createHash('sha256').update(key).digest('hex');
@@ -48,24 +50,40 @@ function save() {
 }
 export class ApiError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }
 const counters = new Map<string, { minute: number; count: number }>();
+const keyCounters=new Map<string,{minute:number;count:number}>(),keyControllers=new Map<string,Set<AbortController>>(),keyRequests=new Map<string,number>();
+function scopedKey(client:Client,key:ManagedKey):Client{
+ const min=(a:number|undefined,b:number,fallback:number)=>Math.min(a||fallback,b);
+ const models=client.models.length?(key.models.length?client.models.filter(model=>key.models.includes(model)):client.models):key.models;
+ const result:Client={...client,admin:false,role:'inference',credentialId:key.id,keyId:key.id,applicationMaxConcurrent:client.maxConcurrent||1,models,scopes:key.scopes.filter(scope=>(client.scopes??clientScopes).includes(scope)),rpm:client.rpm,maxTokens:min(client.maxTokens,key.maxTokens,512),maxConcurrent:min(client.maxConcurrent,key.maxConcurrent,1),maxContextTokens:min(client.maxContextTokens,key.maxContextTokens,platform.contextSize),priority:Math.min(client.priority||0,key.priority),dailyTokenLimit:client.dailyTokenLimit};
+ // Empty model intersection must never become the legacy "all models" wildcard.
+ if(client.models.length&&key.models.length&&!models.length)result.models=['__amu_no_authorized_model__'];
+ Object.defineProperty(result,'enabled',{get:()=>client.enabled&&!client.archivedAt&&!client.revokedAt&&keyActive(key)});Object.defineProperty(result,'hash',{get:()=>key.hash});return result;
+}
 const clientObservations = new Map<string, { lastSeenAt: string; remoteAddress: string }>();
 export function authenticate(req: http.IncomingMessage): Client {
   const pathname=new URL(req.url||'/','http://localhost').pathname;
   if(/^\/api\/central\/backups\/[a-f0-9-]{36}\/download$/.test(pathname)&&!req.headers.authorization){const cookie=req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('AMUDownload='))?.slice(12);if(cookie){const ticket=downloadTickets.get(cookie);downloadTickets.delete(cookie);const client=ticket&&ticket.expires>Date.now()&&ticket.path===pathname?config.clients.find(c=>c.id===ticket.clientId&&c.hash===ticket.hash&&c.enabled&&c.admin):undefined;if(client)return client;}}
+  const session=!req.headers.authorization&&!req.headers['x-amu-api-key']?browserPrincipal(req,config.clients):undefined;
   const authorization = req.headers.authorization;
   const key = authorization?.startsWith('Bearer ') ? authorization.slice(7) : req.headers['x-amu-api-key'];
-  if (typeof key !== 'string' || key.length > 512) throw new ApiError(401, 'API key required');
-  const digest = hash(key);
-  const client = config.clients.find(c => c.enabled && !c.revokedAt && c.hash.length === digest.length && crypto.timingSafeEqual(Buffer.from(c.hash), Buffer.from(digest)));
-  if (!client) throw new ApiError(401, 'Invalid API key');
+  if (!session&&(typeof key !== 'string' || key.length > 512)) throw new ApiError(401, 'API key required');
+  const digest = session?'':hash(key as string);
+  const selectedKey=!session?matchKey(digest):undefined;
+  let client = session||config.clients.find(c => c.enabled && !c.revokedAt &&(!c.keyExpiresAt||Date.parse(c.keyExpiresAt)>Date.now())&& c.hash.length === digest.length && crypto.timingSafeEqual(Buffer.from(c.hash), Buffer.from(digest)));
+  if(!client&&selectedKey&&keyActive(selectedKey)){const application=config.clients.find(c=>c.id===selectedKey.clientId&&!c.admin&&c.enabled&&!c.archivedAt&&!c.revokedAt);if(application)client=scopedKey(application,selectedKey);}
+  if (!client) throw new ApiError(401, 'Invalid, expired or revoked API key');
   clientObservations.set(client.id, { lastSeenAt: new Date().toISOString(), remoteAddress: req.socket.remoteAddress || 'unknown' });
   const minute = Math.floor(Date.now() / 60000);
   const count = counters.get(client.id);
   if (!count || count.minute !== minute) counters.set(client.id, { minute, count: 1 });
   else if (++count.count > client.rpm) throw new ApiError(429, 'Client rate limit exceeded');
+  if(selectedKey){const counter=keyCounters.get(selectedKey.id);if(!counter||counter.minute!==minute)keyCounters.set(selectedKey.id,{minute,count:1});else if(++counter.count>selectedKey.rpm)throw new ApiError(429,'API key rate limit exceeded');}
   return client;
 }
 export function requireAdmin(client: Client) { if (!client.admin) throw new ApiError(403, 'Administrator permission required'); }
+export function unauthenticatedBrowserRoute(req:http.IncomingMessage,res:http.ServerResponse,pathname:string,body:any){
+ const result=pathname==='/api/auth/owner-login'?ownerLogin(req,res,body?.code,config.clients):logoutBrowser(req,res);res.end(JSON.stringify(result));
+}
 let active = 0;
 const limit = platform.gatewayConcurrency;
 function admissionLimit(){return config.provider==='local-http'?limit:Math.max(1,Math.min(limit,amuInference.workers().filter(w=>w.enabled&&w.status.ready&&!w.managing).length));}
@@ -110,7 +128,7 @@ setGenerationPolicy(input=>{
  if(count>=(client.maxConcurrent||(client.admin?2:1)))throw new ApiError(429,'Client inference concurrency exceeded');
  const reserved=Buffer.byteLength(JSON.stringify(input.messages),'utf8')+input.messages.length*32+(input.maxTokens||256);
  const settle=reserveTokens(client.id,reserved,client.dailyTokenLimit);if(!settle)throw new ApiError(429,'Daily client token budget exceeded');
- nativeClientActive.set(client.id,count+1);input.priority=client.priority||0;input.maxContextTokens=Math.min(client.maxContextTokens||platform.contextSize,platform.contextSize);
+ nativeClientActive.set(client.id,count+1);input.priority=Math.min(input.priority??(client.priority||0),client.priority||0);input.maxContextTokens=Math.min(input.maxContextTokens||platform.contextSize,client.maxContextTokens||platform.contextSize,platform.contextSize);
  return {settle:result=>{nativeClientActive.set(client.id,Math.max(0,(nativeClientActive.get(client.id)||1)-1));settle(result?.usage,!result);}};
 });
 const events: object[] = [];
@@ -147,6 +165,15 @@ export async function health() {
 }
 async function statusPayload(){return { ...await health(), engine:amuInference.status(),requests:[...requests.values()], scheduler:{active,queued:queue.length,httpRequests:maintenanceStatus().activeRequests,httpLimit:platform.maxHttpRequests,capacity:platform.queueCapacity,concurrency:admissionLimit(),configuredConcurrency:limit,policy:"bounded-priority-round-robin"}, platform, connection: { provider: config.provider || 'embedded', upstream: config.upstream, model: config.model }, clients: config.clients.map(({ hash: _, ...c }) => ({...c,...credentialInfo(c),role:roleOf(c),active:clientActive.get(c.id)||0,usage:usage(c.id),scopes:c.scopes??clientScopes,observation:clientObservations.get(c.id)||null})), resources: { memory: process.memoryUsage(), freeMemory: os.freemem(), totalMemory: os.totalmem(), cpus: os.cpus().length, cpuUsage: process.cpuUsage(), uptime: process.uptime() }, events };}
 export async function centralRoute(req: http.IncomingMessage, res: http.ServerResponse, pathname: string, body: any, client: Client): Promise<boolean> {
+  if(pathname==='/api/auth/session'&&req.method==='POST'){requireAdmin(client);res.end(JSON.stringify(createBrowserSession(req,res,client)));return true;}
+  if(pathname.startsWith('/api/central/keys')){
+   requireAdmin(client);
+   if(pathname==='/api/central/keys'&&req.method==='GET'){res.end(JSON.stringify({keys:listKeys(),legacy:config.clients.filter(c=>!c.admin).map(c=>({id:'legacy:'+c.id,clientId:c.id,name:c.keyName||'Bisheriger Anwendungsschlüssel',keyId:c.keyId||'legacy-'+c.id,enabled:c.enabled,revokedAt:c.revokedAt,archivedAt:c.archivedAt,expiresAt:c.keyExpiresAt||null,maskedKey:'••••••••',secretRetrievable:false,scope:'application role and permissions',usage:usage(c.id)})),limits:{total:10000,perApplication:64},note:'Zusatzschlüssel erlauben nur Modelle und Chat, höchstens mit den Rechten und Limits der Anwendung. Entwicklungs- und Betriebszugänge bleiben getrennte Anwendungsschlüssel.'}));return true;}
+   if(pathname==='/api/central/keys/create'&&req.method==='POST'){const application=config.clients.find(c=>c.id===body?.clientId&&!c.admin&&c.enabled&&!c.archivedAt&&!c.revokedAt);if(!application)throw new ApiError(409,'Select an enabled application');const result=createKey(body,application);record({action:'api_key_created',clientId:application.id,keyId:result.id});res.end(JSON.stringify(result));return true;}
+   if(pathname==='/api/central/keys/action'&&req.method==='POST'){const result=changeKey(body?.id,body?.action,body);for(const controller of keyControllers.get(body.id)||[])controller.abort(new ApiError(401,'API key changed or revoked'));record({action:'api_key_'+body.action,keyId:body.id,clientId:result.clientId});res.end(JSON.stringify(result));return true;}
+   if(pathname==='/api/central/keys/legacy'&&req.method==='POST'){const application=config.clients.find(c=>c.id===body?.clientId&&!c.admin);if(!application)throw new ApiError(404,'Application not found');if(typeof body.name!=='string'||!body.name.trim()||body.name.length>100)throw new ApiError(400,'Invalid key name');const expires=expiration(body.expiresAt);application.keyName=body.name.trim();application.keyExpiresAt=expires;save();record({action:'legacy_key_metadata_updated',clientId:application.id});res.end('{"ok":true}');return true;}
+   throw new ApiError(404,'Unknown API key endpoint');
+  }
   if (pathname === '/api/client/status' && req.method === 'GET') { res.end(JSON.stringify({ id: client.id, name: client.name, ...credentialInfo(client), scopes:client.scopes??clientScopes, usage:usage(client.id), server:{version,model:config.model,backend:config.provider==='local-http'?'local-http':amuInference.status().backend,uptimeSeconds:process.uptime()}, role: roleOf(client), enabled: client.enabled, models: client.models, limits: { rpm: client.rpm, maxTokens: client.maxTokens || (client.admin ? 2048 : 512), maxConcurrent: client.maxConcurrent || (client.admin ? 2 : 1), dailyTokenLimit:client.dailyTokenLimit||0,maxContextTokens:client.maxContextTokens||platform.contextSize,priority:client.priority||0 }, active: clientActive.get(client.id) || 0, requests:[...requests.values()].filter(r=>r.clientId===client.id), requestsThisMinute: counters.get(client.id)?.minute === Math.floor(Date.now()/60000) ? counters.get(client.id)?.count : 0, observation: clientObservations.get(client.id), inferenceReady: (await health()).inferenceReady })); return true; }
   if (pathname.startsWith('/api/central/')) {
     const operational = ['/api/central/monitoring','/api/central/status','/api/central/models','/api/central/engine/control','/api/central/requests/cancel','/api/central/logs','/api/central/windows/status','/api/central/workers','/api/central/workers/control','/api/central/dashboard'];
@@ -274,12 +301,18 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if (body.max_tokens !== undefined && (!Number.isInteger(body.max_tokens) || body.max_tokens < 1 || body.max_tokens > 32768)) throw new ApiError(400, 'Invalid max_tokens');
   if (['tools','tool_choice','functions','response_format'].some(k => body[k] !== undefined)) throw new ApiError(400, 'This endpoint supports text only; use the AMU Core task API for tools');
   if ((body.max_tokens || 256) > (client.maxTokens || (client.admin ? 2048 : 512))) throw new ApiError(400, 'Client output token limit exceeded');
-  if ((clientActive.get(client.id) || 0) >= (client.maxConcurrent || (client.admin ? 2 : 1))) throw new ApiError(429, 'Client concurrent request limit exceeded');
+  if ((clientActive.get(client.id) || 0) >= (client.applicationMaxConcurrent||client.maxConcurrent || (client.admin ? 2 : 1))) throw new ApiError(429, 'Client concurrent request limit exceeded');
+  if(client.credentialId&&(keyRequests.get(client.credentialId)||0)>=(client.maxConcurrent||1))throw new ApiError(429,'API key concurrent request limit exceeded');
   const reserved=Buffer.byteLength(JSON.stringify(body.messages),'utf8')+body.messages.length*32+(body.max_tokens||256);
   const settleTokens=(config.provider||'embedded')==='embedded'?((_usage?:{prompt_tokens:number;completion_tokens:number},_unknown?:boolean)=>{}):reserveTokens(client.id,reserved,client.dailyTokenLimit);if(!settleTokens)throw new ApiError(429,'Daily client token budget exceeded');
+  const credential=client.credentialId?managedKey(client.credentialId):undefined;let settleKey:ReturnType<typeof reserveTokens>;try{settleKey=credential?reserveTokens('key:'+credential.id,reserved,credential.dailyTokenLimit):undefined;}catch(error){settleTokens();throw error;}
+  if(credential&&!settleKey){settleTokens();throw new ApiError(429,'Daily API key token budget exceeded');}
+  if(credential)keyRequests.set(credential.id,(keyRequests.get(credential.id)||0)+1);
   let inferenceStarted=false,settled=false;
   clientActive.set(client.id, (clientActive.get(client.id) || 0) + 1);
   const controller = new AbortController();
+  if(credential){const set=keyControllers.get(credential.id)||new Set();set.add(controller);keyControllers.set(credential.id,set);}
+  const expiresAt=credential?.expiresAt||client.keyExpiresAt,expiryTimer=expiresAt&&Date.parse(expiresAt)-Date.now()<=platform.requestTimeoutMs?setTimeout(()=>controller.abort(new ApiError(401,'API key expired')),Math.max(1,Date.parse(expiresAt)-Date.now())):undefined;
   const requestId=String(res.getHeader('X-Request-ID')||crypto.randomUUID());requestControllers.set(requestId,controller);requests.set(requestId,{id:requestId,clientId:client.id,streaming:!!body.stream,state:'waiting-admission',since:new Date().toISOString()});
   const controllers = clientControllers.get(client.id) || new Set<AbortController>(); controllers.add(controller); clientControllers.set(client.id, controllers);
   const timer = setTimeout(() => controller.abort(new DOMException('Inference deadline exceeded', 'TimeoutError')), platform.requestTimeoutMs);
@@ -302,8 +335,8 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
         if (res.writableLength > 1048576) controller.abort(new EngineError(429, 'Streaming consumer is too slow'));
       };
       let first = true;
-      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256, temperature: body.temperature, signal: controller.signal, clientId:client.id, priority:client.priority||0, stream:!!body.stream, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
-      settleTokens(result.usage);settled=true;
+      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256,maxContextTokens:client.maxContextTokens, temperature: body.temperature, signal: controller.signal, clientId:client.id, priority:client.priority||0, stream:!!body.stream, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
+      settleTokens(result.usage);settleKey?.(result.usage);settled=true;
       if (body.stream) { chunk({}, result.finishReason); if(body.stream_options?.include_usage===true)res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created,model,choices:[],usage:{...result.usage,total_tokens:result.usage.prompt_tokens+result.usage.completion_tokens}})+'\n\n');res.end('data: [DONE]\n\n'); }
       else res.end(JSON.stringify({ id, object: 'chat.completion', created, model, choices: [{ index: 0, message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }], usage: { ...result.usage, total_tokens: result.usage.prompt_tokens + result.usage.completion_tokens } }));
       record({ action: 'completion', backend: 'embedded', client: client.id, model, stream: !!body.stream, durationMs: result.durationMs, ttftMs: result.ttftMs });
@@ -319,10 +352,10 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
       const { pipeline } = await import('node:stream/promises');
       const { Readable } = await import('node:stream');
       await pipeline(Readable.fromWeb(response.body as any), res, { signal: controller.signal });
-    } else {const result=await response.json() as any;const u=result.usage;if(u&&Number.isSafeInteger(u.prompt_tokens)&&u.prompt_tokens>=0&&Number.isSafeInteger(u.completion_tokens)&&u.completion_tokens>=0){settleTokens(u);settled=true;}res.end(JSON.stringify(result));}
-    if(!settled){settleTokens(undefined,true);settled=true;}
+    } else {const result=await response.json() as any;const u=result.usage;if(u&&Number.isSafeInteger(u.prompt_tokens)&&u.prompt_tokens>=0&&Number.isSafeInteger(u.completion_tokens)&&u.completion_tokens>=0){settleTokens(u);settleKey?.(u);settled=true;}res.end(JSON.stringify(result));}
+    if(!settled){settleTokens(undefined,true);settleKey?.(undefined,true);settled=true;}
     record({ action: 'completion', client: client.id, model, stream: !!body.stream });
     identitySucceeded=true;
-  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { try{finishIdentity?.(identitySucceeded);}catch{console.error('Request identity journal persistence failed; inspect durable records before retrying');}if(!settled)settleTokens(undefined,inferenceStarted);clearInterval(heartbeat);requestControllers.delete(requestId);requests.delete(requestId);controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
+  } catch (error) { record({ action: 'completion_failed', client: client.id, model }); throw error; } finally { try{finishIdentity?.(identitySucceeded);}catch{console.error('Request identity journal persistence failed; inspect durable records before retrying');}if(!settled){settleTokens(undefined,inferenceStarted);settleKey?.(undefined,inferenceStarted);}clearTimeout(expiryTimer);if(credential){keyRequests.set(credential.id,Math.max(0,(keyRequests.get(credential.id)||1)-1));const set=keyControllers.get(credential.id);set?.delete(controller);if(!set?.size)keyControllers.delete(credential.id);}clearInterval(heartbeat);requestControllers.delete(requestId);requests.delete(requestId);controllers.delete(controller); if (!controllers.size) clientControllers.delete(client.id); clientActive.set(client.id, Math.max(0, (clientActive.get(client.id) || 1) - 1)); clearTimeout(timer); res.off('close', disconnect); if (acquired) release(); }
   return true;
 }

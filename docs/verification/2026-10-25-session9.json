@@ -1,0 +1,79 @@
+{
+  "version": "1.7.0",
+  "date": "2026-10-25",
+  "tests": {
+    "build": true,
+    "session9Access": true,
+    "session9Dashboard": true,
+    "session8Management": true,
+    "session8CoreEvents": true,
+    "realWindowsOwnerVerification": true,
+    "realOwnerLoginReplayRejected": true,
+    "browserSessionReload": true,
+    "passed": true,
+    "version": "1.7.0",
+    "testedAt": "2026-10-25T02:57:19.137Z",
+    "nativeJSON": true,
+    "nativeSSE": true,
+    "sseDone": true,
+    "usage": {
+      "prompt_tokens": 19,
+      "completion_tokens": 8,
+      "total_tokens": 27
+    },
+    "elapsedMs": 3590,
+    "application": "existing AMU-Agent-3 credential on Agent-2 only",
+    "noAgent3ProjectChanges": true,
+    "externalInference": false,
+    "session3PolicyRegression": true
+  },
+  "backupBefore": {
+    "id": "910bf7d9-e18c-4dd8-b158-b8c4a797266c",
+    "verified": true,
+    "sqliteIntegrity": "ok",
+    "includesModels": false
+  },
+  "scope": "AMU-Agent-2 only",
+  "limitations": [
+    "large Qwen Coder not installed or certified",
+    "real two-computer TLS/LAN test pending",
+    "additional keys model/chat only",
+    "Windows ACL hardening not performed",
+    "encrypted export decrypt UI pending"
+  ],
+  "backupAfter": {
+    "backup": {
+      "id": "53a13564-f43c-45ba-8d59-b7daa8d5c1ec",
+      "createdAt": "2026-10-25T03:00:41.605Z",
+      "scope": "full",
+      "origin": "manual",
+      "includesModels": false,
+      "encrypted": true,
+      "cipher": "AES-256-GCM",
+      "keySource": "local-recovery-key",
+      "files": 256,
+      "bytes": 4758084,
+      "sha256": "f1c8790a2f55d160ab01494990b6fb0132cbd3cb6126b7e5935dd394a2fd0794"
+    },
+    "verified": {
+      "files": 256,
+      "bytes": 4722688,
+      "authenticated": true,
+      "databases": [
+        {
+          "path": "scratch/secrets/request-identities.sqlite",
+          "integrity": "ok"
+        }
+      ],
+      "backupId": "53a13564-f43c-45ba-8d59-b7daa8d5c1ec",
+      "verified": true,
+      "compatibility": {
+        "compatible": true,
+        "sourceVersion": "1.7.0",
+        "currentVersion": "1.7.0",
+        "schemaVersion": 2,
+        "reason": "Compatible archive schema; inspect restored configuration before activation"
+      }
+    }
+  }
+}
