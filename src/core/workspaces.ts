@@ -1,3 +1,4 @@
+import {gitExecutable} from './git-runtime.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -70,7 +71,7 @@ export async function executeCodingTool(id:string,request:any,owner:string,admin
    if(fs.statSync(p.target).size>128*1024)throw new EngineError(413,'Test input too large');const environment=Object.fromEntries(Object.entries(process.env).filter(([key])=>/^(PATH|SystemRoot|WINDIR|TEMP|TMP)$/i.test(key)));
    try{const output=await runLimited(owner,process.execPath,['--max-old-space-size=128','--check',p.target],{cwd:workspaceRoot(w.root),env:environment,windowsHide:true,timeout:10000,maxBuffer:16384,signal});result={profile:'javascript-syntax',passed:true,stdout:output.stdout,stderr:output.stderr,executesSource:false};}catch(error){if(error instanceof EngineError)throw error;const e=error as any;if(e.killed||signal?.aborted)throw new EngineError(504,'Syntax check cancelled or timed out');result={profile:'javascript-syntax',passed:false,stdout:String(e.stdout||'').slice(0,16000),stderr:String(e.stderr||'Syntax check failed').slice(0,16000),executesSource:false};}
   }else if(tool==='git_status'){
-   const output=await runLimited(owner,'git',['-c','safe.directory='+root,'-c','core.fsmonitor=false','--literal-pathspecs','--no-optional-locks','status','--porcelain=v1','--untracked-files=normal','--',w.root],{cwd:root,windowsHide:true,timeout:5000,maxBuffer:32768,signal});result={status:output.stdout,workspace:w.root,readOnly:true};
+   const output=await runLimited(owner,gitExecutable(),['-c','safe.directory='+root,'-c','core.fsmonitor=false','--literal-pathspecs','--no-optional-locks','status','--porcelain=v1','--untracked-files=normal','--',w.root],{cwd:root,windowsHide:true,timeout:5000,maxBuffer:32768,signal});result={status:output.stdout,workspace:w.root,readOnly:true};
   }
   signal?.throwIfAborted();audit({requestId,workspaceId:id,owner,tool,ok:true,durationMs:Date.now()-started});return {version:1,requestId,ok:true,result,durationMs:Date.now()-started};
  }catch(error){const status=error instanceof EngineError?error.status:503;audit({requestId,workspaceId:id,owner,tool,ok:false,status,durationMs:Date.now()-started});throw error;}

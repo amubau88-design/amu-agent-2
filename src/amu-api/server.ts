@@ -1,3 +1,5 @@
+import {gitRuntimeStatus,configureGitRuntime} from '../core/git-runtime.ts';
+import {agentToolCatalog} from '../core/agent-tools.ts';
 import {platform} from '../central/platform.ts';
 import {enterRequest,maintenanceStatus} from '../central/maintenance.ts';
 import {setBackupIdleCheck} from '../backup/manager.ts';
@@ -67,7 +69,7 @@ export function createAmuApiServer(): http.Server {
         if(pathname==='/api/core/runner'&&req.method==='GET')result=runnerCapabilities();
         else if(/^\/api\/core\/test-runs\/[a-f0-9-]{36}\/cancel$/.test(pathname)&&req.method==='POST')result=cancelTest(pathname.split('/').at(-2)!,client.id,client.admin);
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}$/.test(pathname)&&req.method==='GET')result=readChangeSet(pathname.split('/').at(-1)!,client.id,client.admin);
-        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/(apply|restore|reject)$/.test(pathname)&&req.method==='POST')result=actOnChangeSet(pathname.split('/').at(-2)!,pathname.split('/').at(-1)!,body,client.id,client.admin);
+        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/(apply|restore|reject)$/.test(pathname)&&req.method==='POST'){const packageId=pathname.split('/').at(-2)!,action=pathname.split('/').at(-1)!;amuCore.assertChangeSetAction(readChangeSet(packageId,client.id,client.admin),action);result=actOnChangeSet(packageId,action,body,client.id,client.admin);amuCore.reconcileChangeSet(result);}
         else throw new ApiError(404,'Unknown development endpoint');res.end(JSON.stringify(result));return;
       }
       if(pathname.startsWith('/api/core/workspaces')||pathname==='/api/core/tool-audit'){
@@ -82,6 +84,8 @@ export function createAmuApiServer(): http.Server {
         else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/tools$/.test(pathname)&&req.method==='POST'){const controller=new AbortController(),disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);try{result=await executeCodingTool(pathname.split('/').at(-2)!,body,client.id,client.admin,AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]));}finally{res.off('close',disconnect);}}
         else throw new ApiError(404,'Unknown workspace endpoint');res.end(JSON.stringify(result));return;
       }
+      if(pathname==='/api/core/git-runtime'){requireAdmin(client);const result=req.method==='GET'?gitRuntimeStatus():req.method==='POST'?configureGitRuntime(body):null;if(!result)throw new ApiError(405,'Method not allowed');res.end(JSON.stringify(result));return;}
+      if(pathname==='/api/core/tools'&&req.method==='GET'){requireScope(client,'core:tasks');requireRole(client,['admin','developer']);res.end(JSON.stringify(agentToolCatalog()));return;}
       if (pathname.startsWith('/api/core/')) {
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);
         if(req.method==='POST'&&pathname==='/api/core/tasks'){assertTaskWorkspaceScope(body?.files,body?.workspaceId,client.id,client.admin);if((body?.maxOutputTokens??512)>(client.maxTokens||(client.admin?2048:512)))throw new ApiError(400,'Coding task output token limit exceeds application grant');}

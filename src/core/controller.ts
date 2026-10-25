@@ -1,3 +1,5 @@
+import {writePrivateJson} from '../central/storage.ts';
+import {initializeAgent,agentSources,runCodingAgent,reconcileAgentChangeSet,recoverAgentCheckpoint,type AgentState} from './coding-agent.ts';
 import {platform} from '../central/platform.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,9 +11,9 @@ import { recordSystemEvent } from './monitoring.ts';
 import {workspace,authorizeWorkspaceFile,executeCodingTool} from './workspaces.ts';
 
 type TaskState = 'planning' | 'running' | 'review' | 'completed' | 'failed' | 'interrupted' | 'paused' | 'cancelled' | 'blocked';
-export type CoreCheckpoint = { id: string; at: string; step: number; state: TaskState; hashes: Record<string,string>; reason: string };
-export type CoreTask = { id: string; owner: string; goal: string; files: string[]; state: TaskState; createdAt: string; updatedAt: string; steps: any[]; proposals: string[]; checkpoints?: CoreCheckpoint[]; sourceHashes?: Record<string,string>; maxSteps?: number; continueAfterApply?: boolean; ownerPid?: number; result?: string; error?: string;workspaceId?:string;timeoutMs?:number;maxOutputTokens?:number };
-const save = (task: CoreTask) => { task.updatedAt = new Date().toISOString(); const file = path.join(coreDirectory, task.id + '.task.json'); fs.writeFileSync(file + '.tmp', JSON.stringify(task, null, 2)); fs.renameSync(file + '.tmp', file); };
+export type CoreCheckpoint = { id: string; at: string; step: number; state: TaskState; hashes: Record<string,string|null>; reason: string };
+export type CoreTask = { agent?:AgentState; id: string; owner: string; goal: string; files: string[]; state: TaskState; createdAt: string; updatedAt: string; steps: any[]; proposals: string[]; checkpoints?: CoreCheckpoint[]; sourceHashes?: Record<string,string|null>; maxSteps?: number; continueAfterApply?: boolean; ownerPid?: number; result?: string; error?: string;workspaceId?:string;timeoutMs?:number;maxOutputTokens?:number };
+const save = (task: CoreTask) => { task.updatedAt = new Date().toISOString(); const file = path.join(coreDirectory, task.id + '.task.json'); writePrivateJson(file,task,true); };
 function checkpoint(task: CoreTask, reason: string) {
   task.checkpoints ||= []; task.checkpoints.push({ id: crypto.randomUUID(), at: new Date().toISOString(), step: task.steps.length, state: task.state, hashes: { ...task.sourceHashes }, reason });
   if (task.checkpoints.length > 40) task.checkpoints.shift(); save(task);
@@ -21,6 +23,7 @@ export function recoverInterruptedTasks() {
     try {
       const task: CoreTask = JSON.parse(fs.readFileSync(path.join(coreDirectory,name),'utf8'));
       if (task.ownerPid) { try { process.kill(task.ownerPid,0); continue; } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
+      if(task.agent)recoverAgentCheckpoint(task,checkpoint);
       if(task.state==='review'){
         let recovered=false;
         for(const id of task.proposals){const proposal=reconcileAppliedProposal(id);if(proposal&&!task.steps.some(s=>s.proposalId===id&&['apply_approved','application_recovered'].includes(s.action))){task.sourceHashes||={};task.sourceHashes[proposal.file]=readControlled(proposal.file).sha256;task.steps.push({action:'application_recovered',proposalId:id,file:proposal.file,at:new Date().toISOString()});recovered=true;}}
@@ -37,16 +40,17 @@ export class AMUCore {
   private active: { id: string; controller: AbortController } | null = null;
   private prepare(body: any, owner: string): CoreTask {
     if (this.active) throw new EngineError(429,'A controlled development task is already running');
-    if (typeof body?.goal!=='string'||!body.goal.trim()||body.goal.length>2000||!Array.isArray(body.files)||!body.files.length||body.files.length>4||body.files.some((f:any)=>typeof f!=='string')) throw new EngineError(400,'Provide a goal and one to four source paths');
+    if(body?.mode!==undefined&&!['agent','legacy'].includes(body.mode))throw new EngineError(400,'Unknown task mode');if(body?.mode==='agent'&&typeof body.workspaceId!=='string')throw new EngineError(400,'Agent mode requires an explicit workspace');
+    if (typeof body?.goal!=='string'||!body.goal.trim()||body.goal.length>2000||!Array.isArray(body.files)||!body.files.length||body.files.length>(body.mode==='agent'?8:4)||body.files.some((f:any)=>typeof f!=='string')) throw new EngineError(400,'Provide a goal and one to four source paths');
     if (body.maxSteps!==undefined&&(!Number.isInteger(body.maxSteps)||body.maxSteps<1||body.maxSteps>12)) throw new EngineError(400,'maxSteps must be between 1 and 12');
     if(body.timeoutSeconds!==undefined&&(!Number.isInteger(body.timeoutSeconds)||body.timeoutSeconds<5||body.timeoutSeconds>120))throw new EngineError(400,'Task timeout must be 5–120 seconds');
     if(body.maxOutputTokens!==undefined&&(!Number.isInteger(body.maxOutputTokens)||body.maxOutputTokens<64||body.maxOutputTokens>2048))throw new EngineError(400,'Task output budget must be 64–2048 tokens');
     if(body.workspaceId!==undefined){if(typeof body.workspaceId!=='string')throw new EngineError(400,'Invalid workspace id');for(const file of body.files)authorizeWorkspaceFile(body.workspaceId,file,owner,'read_file');}
-    const sources: ReturnType<typeof readControlled>[]=body.files.map(readControlled);
+    const sources:Array<{file:string;content:string;sha256:string|null}>=body.files.map((file:string)=>{try{return readControlled(file);}catch(error){if(body.mode!=='agent'||!(error instanceof EngineError)||error.status!==404)throw error;return {file,content:'',sha256:null};}});
     if(sources.reduce((n,s)=>n+s.content.length,0)>7000)throw new EngineError(413,'Split large files into a smaller analysis task');
     const task:CoreTask={id:crypto.randomUUID(),owner,goal:body.goal,files:[...new Set<string>(body.files)],state:'planning',createdAt:new Date().toISOString(),updatedAt:'',steps:[],proposals:[],sourceHashes:Object.fromEntries(sources.map(s=>[s.file,s.sha256])),checkpoints:[],maxSteps:body.maxSteps||6,continueAfterApply:body.continueAfterApply===true,ownerPid:process.pid};
     task.timeoutMs=(body.timeoutSeconds||120)*1000;task.maxOutputTokens=body.maxOutputTokens||512;if(body.workspaceId)task.workspaceId=body.workspaceId;
-    checkpoint(task,'scope and source hashes captured'); return task;
+    if(body.mode==='agent')task.agent=initializeAgent(body);checkpoint(task,'scope and source hashes captured'); return task;
   }
   async create(body:any,owner:string,signal?:AbortSignal):Promise<CoreTask>{const task=this.prepare(body,owner);return this.run(task,signal);}
   submit(body:any,owner:string):CoreTask{const task=this.prepare(body,owner);void this.run(task).catch(e=>recordSystemEvent('core_background_failure',{taskId:task.id,category:e.name}));return task;}
@@ -55,6 +59,7 @@ export class AMUCore {
     const controller=new AbortController();this.active={id:task.id,controller};
     const taskSignal=AbortSignal.any([controller.signal,AbortSignal.timeout(Math.min(task.timeoutMs||120000,platform.requestTimeoutMs)),...(signal?[signal]:[])]);
     try{
+      if(task.agent){await runCodingAgent(task,taskSignal,checkpoint);return task;}
       if(task.workspaceId)for(const file of task.files)authorizeWorkspaceFile(task.workspaceId,file,task.owner,'read_file');
       const sources=task.files.map(readControlled);
       for(const source of sources)if(task.sourceHashes?.[source.file]!==source.sha256)throw new EngineError(409,'Source changed since checkpoint');
@@ -93,15 +98,18 @@ export class AMUCore {
     if(this.active)throw new EngineError(429,'Another task is running');
     const task=this.get(id,owner,adminOverride);
     if(!['paused','interrupted','failed','blocked'].includes(task.state))throw new EngineError(409,'Task cannot be resumed in its current state');
-    if(task.steps.filter(s=>s.action!=='apply_approved').length>=20)throw new EngineError(409,'Total task step budget exhausted; create a new scoped task');
+    if(task.agent?task.agent.usage.steps>=task.agent.limits.maxTotalSteps:task.steps.filter(s=>s.action!=='apply_approved').length>=20)throw new EngineError(409,'Total task step budget exhausted; create a new scoped task');
     if(task.workspaceId)for(const file of task.files)authorizeWorkspaceFile(task.workspaceId,file,task.owner,'read_file');
-    const sources=task.files.map(readControlled);const changes=sources.some(s=>task.sourceHashes?.[s.file]!==s.sha256);
+    const sources=task.agent?agentSources(task):task.files.map(readControlled);const changes=sources.some(s=>task.sourceHashes?.[s.file]!==s.sha256);
     if(changes&&options.acceptSourceChanges!==true)throw new EngineError(409,'Source differs from checkpoint; explicit re-analysis approval required');
+    if(task.agent&&options.repair===true){if(task.agent.usage.errors>=task.agent.limits.maxErrors)throw new EngineError(409,'Repair budget exhausted');task.agent.usage.errors++;task.agent.phase='work';delete task.agent.pendingChangeSet;}
     if(changes){task.sourceHashes=Object.fromEntries(sources.map(s=>[s.file,s.sha256]));task.steps.push({action:'source_reanalysis_approved',at:new Date().toISOString()});}
     const extra=options.additionalSteps??4;if(!Number.isInteger(extra)||extra<1||extra>6)throw new EngineError(400,'additionalSteps must be between 1 and 6');
-    task.maxSteps=Math.min(20,Math.max(task.maxSteps||6,task.steps.filter(s=>s.action!=='apply_approved').length)+extra);task.state='planning';task.ownerPid=process.pid;checkpoint(task,'explicit resume approved');
+    task.maxSteps=task.agent?Math.min(task.agent.limits.maxTotalSteps,task.agent.usage.steps+extra):Math.min(20,Math.max(task.maxSteps||6,task.steps.filter(s=>s.action!=='apply_approved').length)+extra);task.state='planning';task.ownerPid=process.pid;checkpoint(task,'explicit resume approved');
     void this.run(task).catch(e=>recordSystemEvent('core_resume_failure',{taskId:id,category:e.name}));return task;
   }
+  assertChangeSetAction(record:any,action:string){if(!record.taskId)return;const task=this.get(record.taskId,record.owner);if(this.active?.id===task.id)throw new EngineError(409,'Pause the running task before changing its package');if(action==='apply'&&task.agent?.pendingChangeSet!==record.id)throw new EngineError(409,'Package is not the task current review');if(action==='apply'&&task.agent)for(const source of agentSources(task))if(task.sourceHashes?.[source.file]!==source.sha256)throw new EngineError(409,'Task source changed before approval');if(action==='apply'&&task.state!=='review')throw new EngineError(409,'Task is not awaiting package approval');}
+  reconcileChangeSet(record:any){if(!record.taskId)return;const task=this.get(record.taskId,record.owner);reconcileAgentChangeSet(task,record,checkpoint);}
   cancel(id:string,owner:string,adminOverride=false){const task=this.get(id,owner,adminOverride);if(this.active?.id===id){this.active.controller.abort(new DOMException('Cancelled by operator','AbortError'));return{...task,state:'cancelling'};}if(['completed','cancelled'].includes(task.state))throw new EngineError(409,'Task is already finished');task.state='cancelled';checkpoint(task,'cancelled by owner');return task;}
   pause(id:string,owner:string,adminOverride=false){const task=this.get(id,owner,adminOverride);if(this.active?.id!==id||!['planning','running'].includes(task.state))throw new EngineError(409,'Only a running task can be paused');this.active.controller.abort(new DOMException('Paused by owner; resume explicitly from checkpoint','TaskPaused'));return {...task,state:'pausing'};}
   reject(id:string,owner:string,adminOverride=false){const proposal=this.proposal(id,owner,adminOverride),task=this.get(proposal.taskId,owner,adminOverride);if(task.state!=='review'||proposal.status!=='proposed')throw new EngineError(409,'Proposal is not awaiting review');proposal.status='rejected';const file=path.join(coreDirectory,id+'.proposal.json');fs.writeFileSync(file+'.tmp',JSON.stringify(proposal,null,2));fs.renameSync(file+'.tmp',file);task.state='paused';task.steps.push({action:'proposal_rejected',proposalId:id,at:new Date().toISOString()});task.result='Proposal rejected; no source changed. Resume explicitly to request a new analysis.';checkpoint(task,'proposal rejected by owner');return proposal;}
