@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-export type ModelEntry = { id: string; filename: string; sha256: string; bytes: number; license: string };
+export type ModelEntry = { id: string; filename: string; sha256: string; bytes: number; license: string; profileId?:string;registeredAt?:string };
 export const modelDirectory = path.resolve(process.env.AMU_MODEL_DIR || 'scratch/models');
 export const registryFile = path.join(modelDirectory, 'registry.json');
 export function listLocalModels(): ModelEntry[] {

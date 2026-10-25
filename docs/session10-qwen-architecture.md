@@ -1,5 +1,7 @@
 # Sitzung 10 – vorbereitete Qwen-Architektur, noch keine Implementierungszusage
 
+Umsetzungsstand nach Sitzung 10 / Version 1.8.0: [aktueller Bericht](session10-coding-runtime.md). Dieser Text dokumentiert den vorherigen Planungsstand aus Sitzung 9.
+
 Recherche am 25.10.2026, ausschließlich Metadaten und Primärquellen gelesen. Keine Gewichte heruntergeladen, keine neue Laufzeit installiert und kein neuer Server gestartet.
 
 ## Modellentscheidung und Artefakte

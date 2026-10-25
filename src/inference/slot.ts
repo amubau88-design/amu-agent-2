@@ -7,6 +7,7 @@ import os from 'node:os';
 import { EngineError, hardware, listLocalModels, modelPath } from './models.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { assessModel, assertMemoryBudget } from './resources.ts';
+import {installedProfile,assertProfileContext} from './profiles.ts';
 export type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number; executionId?:string };
 export type GenerationResult = { content: string; usage: { prompt_tokens: number; completion_tokens: number }; finishReason: 'stop' | 'length'; ttftMs: number; durationMs: number };
@@ -41,9 +42,10 @@ export class AMUInferenceEngine {
   private paused = false;
   private switching = false;
   private loadTimeMs = 0;
+  private runtimeProfile:object|null=null;
   private lastGeneration: { durationMs: number; ttftMs: number; tokens: number } | null = null;
   private pressureCheck=setInterval(()=>{void this.enforceMemoryPressure().catch(()=>recordSystemEvent('memory_pressure_control_error'));},3000).unref();
-  status() { return { backend: 'amu-embedded-llama.cpp', state: this.state, paused: this.paused, switching: this.switching, ready: this.state === 'ready', model: this.selected, active: this.current ? 1 : 0, queued: this.queue.length, restarts: this.restarts, cancelled:this.cancelled, completed: this.completed, loadTimeMs: this.loadTimeMs, lastGeneration: this.lastGeneration, requests: [...(this.current ? [{ id: this.current.id, clientId: this.current.input.clientId || 'internal', state: this.current.cancelling?'cancelling':'running', streaming: !!this.current.input.stream }] : []), ...this.queue.map(j => ({ id: j.id, clientId: j.input.clientId || 'internal', state: 'queued', streaming: !!j.input.stream }))], lastError: this.lastError, nativeProcess: this.nativeProcess, hardware:this.settings }; }
+  status() { return { backend: 'amu-embedded-llama.cpp', state: this.state, paused: this.paused, switching: this.switching, ready: this.state === 'ready', model: this.selected, active: this.current ? 1 : 0, queued: this.queue.length, restarts: this.restarts, cancelled:this.cancelled, completed: this.completed, loadTimeMs: this.loadTimeMs, lastGeneration: this.lastGeneration,runtimeProfile:this.runtimeProfile, requests: [...(this.current ? [{ id: this.current.id, clientId: this.current.input.clientId || 'internal', state: this.current.cancelling?'cancelling':'running', streaming: !!this.current.input.stream }] : []), ...this.queue.map(j => ({ id: j.id, clientId: j.input.clientId || 'internal', state: 'queued', streaming: !!j.input.stream }))], lastError: this.lastError, nativeProcess: this.nativeProcess, hardware:this.settings }; }
   async initialize(duringSwitch = false): Promise<void> {
     if (this.closing) throw new EngineError(503, 'Engine is shutting down');
     if (this.switching && !duringSwitch) throw new EngineError(503, 'Model operation in progress');
@@ -56,19 +58,21 @@ export class AMUInferenceEngine {
   private async load() {
     const model = listLocalModels().find(m => m.id === this.selected);
     if (!model) throw new EngineError(503, 'No AMU model installed; import a GGUF model first');
+    const profile=installedProfile(model.id);assertProfileContext(profile,this.settings.contextSize);
     const assessment = await assessModel(model.id,0,this.settings.contextSize); assertMemoryBudget(assessment.estimatedRamBytes, assessment.availableBudgetBytes);
     if (this.worker) await stopProcess(this.worker);
     this.state = 'loading';
     const loadStarted = Date.now();
     const entry = new URL(import.meta.url.endsWith('.ts') ? './worker.ts' : './worker.js', import.meta.url);
-    const worker = fork(fileURLToPath(entry), [], { execArgv: ['--experimental-strip-types'], windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { ...process.env, AMU_INFERENCE_CONFIG: JSON.stringify({ modelPath: modelPath(model.id), sha256: model.sha256, ...this.settings }) } });
+    const worker = fork(fileURLToPath(entry), [], { execArgv: ['--experimental-strip-types'], windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { ...process.env, AMU_INFERENCE_CONFIG: JSON.stringify({ modelPath: modelPath(model.id), sha256: model.sha256, profile, ...this.settings }) } });
     this.worker = worker;
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { reject(new EngineError(504, 'Embedded model load deadline exceeded')); void stopProcess(worker); }, 90000);
       worker.on('message', (message: any) => {
         if (this.worker !== worker) return;
+        if(message.type==='startup-failure'){fail(String(message.message||'Embedded runtime initialization failed'));void stopProcess(worker);return;}
         if (message.nativeProcess) this.nativeProcess = message.nativeProcess;
-        if (message.type === 'ready') { clearTimeout(timer); this.state = 'ready'; this.lastError = null; this.loadTimeMs = Date.now() - loadStarted; resolve(); }
+        if (message.type === 'ready') { clearTimeout(timer); this.state = 'ready'; this.lastError = null; this.loadTimeMs = Date.now() - loadStarted;this.runtimeProfile={profileId:message.profileId,chatWrapper:message.chatWrapper,tokenizer:message.tokenizer,capabilities:message.capabilities}; resolve(); }
         else if (this.current && message.id === this.current.id) {
           if (message.type === 'chunk') {
             if(this.current.cancelling)return;
@@ -139,7 +143,7 @@ export class AMUInferenceEngine {
   }
   async selectModel(id: string) {
     if (this.current || this.queue.length || this.initializing || this.switching) throw new EngineError(409, 'Engine is busy');
-    modelPath(id);
+    modelPath(id);assertProfileContext(installedProfile(id),this.settings.contextSize);
     this.switching = true;
     const previous = this.selected;
     const wasPaused = this.paused;

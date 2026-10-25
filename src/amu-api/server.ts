@@ -16,6 +16,8 @@ import { recordSystemEvent } from '../core/monitoring.ts';
 import { bindHost, tlsOptions, validateNetworkConfiguration, checkNetworkAccess } from '../central/network.ts';
 import { requireRole } from '../central/permissions.ts';
 import { amuInference } from '../inference/engine.ts';
+import {codingManagementRoute} from '../inference/coding-management.ts';
+import {listWorkspaces,registerWorkspace,configureWorkspace,executeCodingTool,toolAudit,assertTaskWorkspaceScope} from '../core/workspaces.ts';
 
 export function createAmuApiServer(): http.Server {
   validateNetworkConfiguration();
@@ -56,8 +58,20 @@ export function createAmuApiServer(): http.Server {
         }
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
+      if(await codingManagementRoute(req,res,pathname,body,client.admin))return;
+      if(pathname.startsWith('/api/core/workspaces')||pathname==='/api/core/tool-audit'){
+        requireScope(client,'core:tasks');requireRole(client,['admin','developer']);let result;
+        if(pathname==='/api/core/workspaces'&&req.method==='GET')result=listWorkspaces(client.id,client.admin);
+        else if(pathname==='/api/core/workspaces'&&req.method==='POST'){requireAdmin(client);result=registerWorkspace(body,client.id);}
+        else if(pathname==='/api/core/tool-audit'&&req.method==='GET'){requireAdmin(client);result=toolAudit();}
+        else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/configure$/.test(pathname)&&req.method==='POST'){requireAdmin(client);result=configureWorkspace(pathname.split('/').at(-2)!,body);}
+        else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/tools$/.test(pathname)&&req.method==='POST'){const controller=new AbortController(),disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);try{result=await executeCodingTool(pathname.split('/').at(-2)!,body,client.id,client.admin,AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]));}finally{res.off('close',disconnect);}}
+        else throw new ApiError(404,'Unknown workspace endpoint');res.end(JSON.stringify(result));return;
+      }
       if (pathname.startsWith('/api/core/')) {
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);
+        if(req.method==='POST'&&pathname==='/api/core/tasks'){assertTaskWorkspaceScope(body?.files,body?.workspaceId,client.id,client.admin);if((body?.maxOutputTokens??512)>(client.maxTokens||(client.admin?2048:512)))throw new ApiError(400,'Coding task output token limit exceeds application grant');}
+        if(req.method==='POST'&&pathname.endsWith('/resume')){const task=amuCore.get(pathname.split('/').at(-2)!,client.id,client.admin);assertTaskWorkspaceScope(task.files,task.workspaceId,client.id,client.admin);}
         if(req.method==='GET'&&/^\/api\/core\/tasks\/[a-f0-9-]+\/events$/.test(pathname)){
           const id=pathname.split('/').at(-2)!,initialHash=client.hash;
           await streamTaskEvents(res,client.id,client.maxConcurrent||1,platform.requestTimeoutMs,()=>!client.enabled||client.revokedAt||client.hash!==initialHash?401:client.admin||(client.role==='developer'&&(!client.scopes||client.scopes.includes('core:tasks')))?0:403,()=>amuCore.get(id,client.id,client.admin));return;
@@ -72,8 +86,11 @@ export function createAmuApiServer(): http.Server {
           else if (pathname === '/api/core/tasks' && req.method === 'GET') result = amuCore.list(client.id,client.admin);
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.get(pathname.split('/').at(-1)!, client.id,client.admin);
           else if (/^\/api\/core\/proposals\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.proposal(pathname.split('/').at(-1)!, client.id,client.admin);
+          else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/diff$/.test(pathname) && req.method === 'GET') result=amuCore.diff(pathname.split('/').at(-2)!,client.id,client.admin);
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/resume$/.test(pathname) && req.method === 'POST') { if(body?.acceptSourceChanges)requireAdmin(client);result=amuCore.resume(pathname.split('/').at(-2)!,client.id,body,client.admin);res.statusCode=202; }
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/cancel$/.test(pathname) && req.method === 'POST') result=amuCore.cancel(pathname.split('/').at(-2)!,client.id,client.admin);
+          else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/pause$/.test(pathname) && req.method === 'POST') result=amuCore.pause(pathname.split('/').at(-2)!,client.id,client.admin);
+          else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/reject$/.test(pathname) && req.method === 'POST') result=amuCore.reject(pathname.split('/').at(-2)!,client.id,client.admin);
           else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/apply$/.test(pathname) && req.method === 'POST') { requireAdmin(client);result = amuCore.apply(pathname.split('/').at(-2)!, client.id,body||{},client.admin); recordSystemEvent('core_change_applied', { proposalId: result.id, clientId: client.id }); }
           else throw new ApiError(404, 'Unknown AMU Core endpoint');
           res.end(JSON.stringify(result)); return;
@@ -91,7 +108,7 @@ export function createAmuApiServer(): http.Server {
       if(!maintenanceStatus().operation)recordSystemEvent('request_error', { requestId, status, category: (error as Error).name });
       if(status===429||status===503)res.setHeader('Retry-After',status===429?'1':'5');
       res.writeHead(status);
-      res.end(JSON.stringify({ error: { message: error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status), reason: ({400:'invalid_request',401:'authentication_failed',403:'permission_denied',404:'not_found',409:'state_conflict',429:'resource_limit',499:'cancelled',503:'service_unavailable',504:'deadline_exceeded',507:'insufficient_memory'} as Record<number,string>)[status]||'request_failed' }, requestId }));
+      res.end(JSON.stringify({ error: { message: status===507?'Nicht genügend freier RAM nach Systemreserve. Kleineres Modell oder kürzeren Kontext wählen und den Worker-Status prüfen.':error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status), reason: ({400:'invalid_request',401:'authentication_failed',403:'permission_denied',404:'not_found',409:'state_conflict',429:'resource_limit',499:'cancelled',503:'service_unavailable',504:'deadline_exceeded',507:'insufficient_memory'} as Record<number,string>)[status]||'request_failed' }, requestId }));
     }
   };
   const tls = tlsOptions();

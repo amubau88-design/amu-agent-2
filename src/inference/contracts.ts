@@ -1,5 +1,5 @@
 import type {AMUInferenceEngine,Generation,GenerationResult} from './slot.ts';
-export type WorkerStatus=ReturnType<AMUInferenceEngine['status']>;
+export type WorkerStatus=Omit<ReturnType<AMUInferenceEngine['status']>,'runtimeProfile'>&{runtimeProfile?:object|null};
 /** Transport boundary. Current implementation uses private local IPC, without a network listener. */
 export interface InferenceWorker {
  status():WorkerStatus;

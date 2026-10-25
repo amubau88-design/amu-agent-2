@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import {JinjaTemplateChatWrapper} from 'node-llama-cpp';
+import {codingProfile} from '../inference/profiles.ts';
+const fixture=JSON.parse(fs.readFileSync(new URL('./fixtures/qwen3-coder-template.json',import.meta.url),'utf8'));
+assert.equal(crypto.createHash('sha256').update(fixture.template).digest('hex'),fixture.sha256);
+assert.equal(codingProfile('qwen3-coder-30b-a3b').expectedTemplateSha256,fixture.sha256);
+const wrapper=new JinjaTemplateChatWrapper({template:fixture.template,convertUnsupportedSystemMessagesToUserMessages:false,functionCallMessageTemplate:'noJinja'});
+const rendered=wrapper.generateContextState({chatHistory:[{type:'system',text:'AMU system marker'},{type:'user',text:'AMU question one'},{type:'model',response:['AMU answer one']},{type:'user',text:'AMU question two'}],documentFunctionParams:false}).contextText.toString();
+for(const text of ['AMU system marker','AMU question one','AMU answer one','AMU question two'])assert.ok(rendered.includes(text));
+assert.ok(rendered.includes('<|im_start|>assistant'));
+console.log(JSON.stringify({passed:true,officialQwenCoderTemplate:true,systemAndMultiTurnRendering:true,templateSha256:fixture.sha256,modelWeightsLoaded:false,nativeToolCalling:false}));

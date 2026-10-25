@@ -22,6 +22,13 @@ export function controlledPath(relative: string, write = false): string {
   return target;
 }
 export const contentHash = (text: string) => crypto.createHash('sha256').update(text).digest('hex');
+/** Complete replacement rendered as a valid unified diff, including missing final newlines. */
+export function replacementDiff(file:string,before:string,after:string,exists=true){
+ const lines=(text:string)=>text===''?[]:text.endsWith('\n')?text.slice(0,-1).split('\n'):text.split('\n');
+ const old=lines(before),next=lines(after),range=(count:number)=>count?'1,'+count:'0,0';
+ const block=(rows:string[],prefix:string,text:string)=>rows.map(line=>prefix+line+'\n').join('')+(rows.length&&!text.endsWith('\n')?'\\ No newline at end of file\n':'');
+ return '--- '+(exists?'a/'+file:'/dev/null')+'\n+++ b/'+file+'\n@@ -'+range(old.length)+' +'+range(next.length)+' @@\n'+block(old,'-',before)+block(next,'+',after);
+}
 export function readControlled(relative: string) {
   const target = controlledPath(relative);
   if (!fs.existsSync(target) || !fs.statSync(target).isFile()) throw new EngineError(404, 'Source file not found');
@@ -30,7 +37,7 @@ export function readControlled(relative: string) {
   return { file: relative, content, sha256: contentHash(content), validation: checkSource(relative, content) };
 }
 export const isCriticalSource = (file: string) => /^(?:package\.json$|tsconfig\.json$|scripts\/|src\/)/.test(file.replaceAll('\\', '/'));
-export type Proposal = { id: string; taskId: string; file: string; baseHash: string | null; content: string; contentHash?: string; risk?: 'critical' | 'normal'; status: 'proposed' | 'applied'; createdAt: string; backup?: string };
+export type Proposal = { id: string; taskId: string; file: string; baseHash: string | null; content: string; contentHash?: string; risk?: 'critical' | 'normal'; status: 'proposed' | 'applied' | 'rejected'; createdAt: string; backup?: string };
 export function createProposal(taskId: string, file: string, content: string, baseHash: string | null): Proposal {
   const target = controlledPath(file, true);
   if (typeof content !== 'string' || Buffer.byteLength(content) > 128 * 1024) throw new EngineError(413, 'Proposed content too large');

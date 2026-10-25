@@ -1,0 +1,231 @@
+{
+  "version": "1.8.0",
+  "recordedAt": "2026-10-25T10:20:06.970Z",
+  "baselineCommit": "632f833",
+  "scope": "AMU-Agent-2 only",
+  "tests": {
+    "typeScriptBuild": true,
+    "session10CodingBoundaries": true,
+    "actualWindowsJunctionRejected": true,
+    "workspaceLegacyBypassRejected": true,
+    "subprocessConcurrencyBound": true,
+    "session10AgentLoop": true,
+    "taskPauseResume": true,
+    "session10DashboardHandlers": true,
+    "officialQwen3TemplateRendering": true,
+    "session9AuthenticationAndKeys": true,
+    "previousCoreRegression": true,
+    "nativeStartStopRamCancellation": true,
+    "nativeWorkerCrashRecoveryWithoutReplay": true
+  },
+  "nativeAcceptance": {
+    "version": "1.8.0",
+    "testedAt": "2026-10-25T10:01:10.703Z",
+    "nativeStructuredJSON": true,
+    "model": "qwen2.5:1.5b",
+    "scope": "disposable AMU-Agent-2 workspace only",
+    "largeModelAcceptance": false,
+    "fullPlatformQC": false,
+    "taskId": "7c20a72c-a3b4-41e3-99f1-2f997b125f17",
+    "nativeTaskState": "review",
+    "actions": [
+      "propose_file"
+    ],
+    "passed": true,
+    "nativeCodingEndToEnd": true,
+    "noAutomaticWrite": true,
+    "approvedPatchApplied": true,
+    "postApplySyntaxPassed": true,
+    "backupExists": true,
+    "compiledModelRuntime": {
+      "profileId": "local-gguf",
+      "chatWrapper": "Qwen",
+      "tokenizer": "embedded-gguf",
+      "capabilities": {
+        "jsonSchema": true,
+        "structuredTools": true,
+        "nativeToolCalling": false
+      }
+    },
+    "nativeFinalTaskState": "completed"
+  },
+  "server": {
+    "version": "1.8.0",
+    "ready": true,
+    "engine": {
+      "model": "qwen2.5:1.5b",
+      "state": "ready",
+      "runtimeProfile": {
+        "profileId": "local-gguf",
+        "chatWrapper": "Qwen",
+        "tokenizer": "embedded-gguf",
+        "capabilities": {
+          "jsonSchema": true,
+          "structuredTools": true,
+          "nativeToolCalling": false
+        }
+      },
+      "active": 0,
+      "queued": 0,
+      "workers": 1,
+      "hardware": {
+        "cpu": "Intel(R) Xeon(R) CPU E3-1230 V2 @ 3.30GHz",
+        "logicalCpus": 8,
+        "totalMemory": 25670639616,
+        "threads": 4,
+        "contextSize": 4096,
+        "gpu": false,
+        "parallelSequences": 1
+      }
+    },
+    "hardwareInventory": {
+      "cpu": "Intel(R) Xeon(R) CPU E3-1230 V2 @ 3.30GHz",
+      "logicalCpus": 8,
+      "totalMemoryBytes": 25670639616,
+      "freeMemoryBytes": 9432248320,
+      "adapters": [
+        {
+          "name": "GeForce 605",
+          "totalVramBytes": 1073741824,
+          "freeVramBytes": 575668224,
+          "vramVerified": true,
+          "source": "nvidia-smi"
+        }
+      ],
+      "probeError": null,
+      "runtimeBackend": "cpu",
+      "gpuOffloadingEnabled": false,
+      "checkedAt": "2026-10-25T10:10:16.410Z"
+    },
+    "existingAgent3KeyAuthenticates": true,
+    "largeProfiles": [
+      {
+        "id": "qwen3-coder-30b-a3b",
+        "available": false,
+        "preflight": {
+          "configuredContext": 4096,
+          "minimumEstimatedRamBytes": 22136870912,
+          "availableRamBudgetBytes": 6865577574.4,
+          "sufficientForMinimum": false,
+          "reason": "Keine passenden lokalen Gewichte installiert. Kein automatischer Download."
+        }
+      },
+      {
+        "id": "qwen25-coder-32b",
+        "available": false,
+        "preflight": {
+          "configuredContext": 4096,
+          "minimumEstimatedRamBytes": 24416870912,
+          "availableRamBudgetBytes": 6865577574.4,
+          "sufficientForMinimum": false,
+          "reason": "Keine passenden lokalen Gewichte installiert. Kein automatischer Download."
+        }
+      }
+    ],
+    "lanReady": false,
+    "twoComputerTest": "not performed",
+    "finalReadiness": {
+      "server": "AMU-Agent-2",
+      "version": "1.8.0",
+      "uptimeSeconds": 359.8134891,
+      "status": "ready",
+      "inferenceReady": true,
+      "maintenance": false,
+      "active": 0,
+      "queued": 0,
+      "engine": {
+        "backend": "amu-embedded-llama.cpp",
+        "state": "ready",
+        "ready": true,
+        "paused": false,
+        "model": "qwen2.5:1.5b",
+        "active": 0,
+        "queued": 0
+      }
+    }
+  },
+  "backupBefore": {
+    "id": "dd00ca9c-92ab-49fa-9f6b-50bf05932e9c",
+    "createdAt": "2026-10-25T03:09:35.693Z",
+    "scope": "full",
+    "origin": "manual",
+    "includesModels": false,
+    "encrypted": true,
+    "cipher": "AES-256-GCM",
+    "keySource": "local-recovery-key",
+    "files": 257,
+    "bytes": 5078860,
+    "sha256": "9d2be4a6ec3af5559c5558c42bf799473025db08c0df25410511d5ff30e0d260",
+    "verification": {
+      "files": 257,
+      "bytes": 5043327,
+      "authenticated": true,
+      "databases": [
+        {
+          "path": "scratch/secrets/request-identities.sqlite",
+          "integrity": "ok"
+        }
+      ],
+      "backupId": "dd00ca9c-92ab-49fa-9f6b-50bf05932e9c",
+      "verified": true,
+      "compatibility": {
+        "compatible": true,
+        "sourceVersion": "1.7.0",
+        "currentVersion": "1.8.0",
+        "schemaVersion": 2,
+        "reason": "Compatible archive schema; inspect restored configuration before activation"
+      }
+    }
+  },
+  "limitations": [
+    "No large Qwen Coder weights installed or native large-model acceptance",
+    "Native OpenAI tool_calls not implemented; AMU structured tools are available",
+    "run_test supports syntax-only checks, no general code-execution sandbox yet",
+    "Task initial scope remains one to four files / 7000 characters",
+    "Real two-computer TLS/LAN acceptance pending",
+    "Full platform QC and load/security acceptance remain pending"
+  ],
+  "weightsDownloaded": false,
+  "paidServicesUsed": false,
+  "backupAfter": {
+    "backup": {
+      "id": "5db1c8ac-f494-4cf8-9ee1-f8f0fe0f88dd",
+      "createdAt": "2026-10-25T10:18:37.005Z",
+      "scope": "full",
+      "origin": "manual",
+      "includesModels": false,
+      "encrypted": true,
+      "cipher": "AES-256-GCM",
+      "keySource": "local-recovery-key",
+      "files": 303,
+      "bytes": 4460744,
+      "sha256": "1994f3bda15db751ffe14b692f6aebcfa01d5e56dd9af28718c634caf0bd06dc"
+    },
+    "verified": {
+      "files": 303,
+      "bytes": 4417725,
+      "authenticated": true,
+      "databases": [
+        {
+          "path": "scratch/secrets/request-identities.sqlite",
+          "integrity": "ok"
+        }
+      ],
+      "backupId": "5db1c8ac-f494-4cf8-9ee1-f8f0fe0f88dd",
+      "verified": true,
+      "compatibility": {
+        "compatible": true,
+        "sourceVersion": "1.8.0",
+        "currentVersion": "1.8.0",
+        "schemaVersion": 2,
+        "reason": "Compatible archive schema; inspect restored configuration before activation"
+      }
+    }
+  },
+  "backupInterruptionResolved": {
+    "reason": "Strict archive check rejected session-10 test junctions",
+    "onlyOwnTestLinksRemoved": 5,
+    "targetDataDeleted": false,
+    "archiveLinkProtectionUnchanged": true
+  }
+}

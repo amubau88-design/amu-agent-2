@@ -1,3 +1,4 @@
+import {outputSchema} from '../inference/output-schema.ts';
 import {amuCore} from '../core/controller.ts';
 import {browserPrincipal,ownerLogin,logoutBrowser,createBrowserSession} from './browser-auth.ts';
 import {createKey,changeKey,listKeys,matchKey,keyActive,managedKey,expiration,type ManagedKey} from './api-keys.ts';
@@ -126,7 +127,7 @@ setGenerationPolicy(input=>{
  if((input.maxTokens||256)>(client.maxTokens||(client.admin?2048:512)))throw new ApiError(400,'Client output token limit exceeded');
  const count=nativeClientActive.get(client.id)||0;
  if(count>=(client.maxConcurrent||(client.admin?2:1)))throw new ApiError(429,'Client inference concurrency exceeded');
- const reserved=Buffer.byteLength(JSON.stringify(input.messages),'utf8')+input.messages.length*32+(input.maxTokens||256);
+ const reserved=Buffer.byteLength(JSON.stringify(input.messages),'utf8')+(input.responseSchema?Buffer.byteLength(JSON.stringify(input.responseSchema),'utf8')+128:0)+input.messages.length*32+(input.maxTokens||256);
  const settle=reserveTokens(client.id,reserved,client.dailyTokenLimit);if(!settle)throw new ApiError(429,'Daily client token budget exceeded');
  nativeClientActive.set(client.id,count+1);input.priority=Math.min(input.priority??(client.priority||0),client.priority||0);input.maxContextTokens=Math.min(input.maxContextTokens||platform.contextSize,client.maxContextTokens||platform.contextSize,platform.contextSize);
  return {settle:result=>{nativeClientActive.set(client.id,Math.max(0,(nativeClientActive.get(client.id)||1)-1));settle(result?.usage,!result);}};
@@ -299,11 +300,12 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
   if(body.stream_options!==undefined&&(!body.stream_options||typeof body.stream_options!=='object'||Array.isArray(body.stream_options)||(body.stream_options.include_usage!==undefined&&typeof body.stream_options.include_usage!=='boolean')))throw new ApiError(400,'Invalid stream_options');
   if (body.temperature !== undefined && (typeof body.temperature !== 'number' || body.temperature < 0 || body.temperature > 2)) throw new ApiError(400, 'Invalid temperature');
   if (body.max_tokens !== undefined && (!Number.isInteger(body.max_tokens) || body.max_tokens < 1 || body.max_tokens > 32768)) throw new ApiError(400, 'Invalid max_tokens');
-  if (['tools','tool_choice','functions','response_format'].some(k => body[k] !== undefined)) throw new ApiError(400, 'This endpoint supports text only; use the AMU Core task API for tools');
+  if (['tools','tool_choice','functions'].some(k => body[k] !== undefined)) throw new ApiError(400, 'This endpoint supports text only; use the AMU Core task API for tools');
   if ((body.max_tokens || 256) > (client.maxTokens || (client.admin ? 2048 : 512))) throw new ApiError(400, 'Client output token limit exceeded');
   if ((clientActive.get(client.id) || 0) >= (client.applicationMaxConcurrent||client.maxConcurrent || (client.admin ? 2 : 1))) throw new ApiError(429, 'Client concurrent request limit exceeded');
   if(client.credentialId&&(keyRequests.get(client.credentialId)||0)>=(client.maxConcurrent||1))throw new ApiError(429,'API key concurrent request limit exceeded');
-  const reserved=Buffer.byteLength(JSON.stringify(body.messages),'utf8')+body.messages.length*32+(body.max_tokens||256);
+  const responseSchema=outputSchema(body.response_format);if(responseSchema&&config.provider==='local-http')throw new ApiError(400,'Structured output requires the embedded AMU runtime');
+  const reserved=Buffer.byteLength(JSON.stringify(body.messages),'utf8')+(responseSchema?Buffer.byteLength(JSON.stringify(responseSchema),'utf8')+128:0)+body.messages.length*32+(body.max_tokens||256);
   const settleTokens=(config.provider||'embedded')==='embedded'?((_usage?:{prompt_tokens:number;completion_tokens:number},_unknown?:boolean)=>{}):reserveTokens(client.id,reserved,client.dailyTokenLimit);if(!settleTokens)throw new ApiError(429,'Daily client token budget exceeded');
   const credential=client.credentialId?managedKey(client.credentialId):undefined;let settleKey:ReturnType<typeof reserveTokens>;try{settleKey=credential?reserveTokens('key:'+credential.id,reserved,credential.dailyTokenLimit):undefined;}catch(error){settleTokens();throw error;}
   if(credential&&!settleKey){settleTokens();throw new ApiError(429,'Daily API key token budget exceeded');}
@@ -335,7 +337,7 @@ export async function centralRoute(req: http.IncomingMessage, res: http.ServerRe
         if (res.writableLength > 1048576) controller.abort(new EngineError(429, 'Streaming consumer is too slow'));
       };
       let first = true;
-      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256,maxContextTokens:client.maxContextTokens, temperature: body.temperature, signal: controller.signal, clientId:client.id, priority:client.priority||0, stream:!!body.stream, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
+      const result = await amuInference.generate({ model, messages: body.messages, maxTokens: body.max_tokens || 256,maxContextTokens:client.maxContextTokens,responseSchema, temperature: body.temperature, signal: controller.signal, clientId:client.id, priority:client.priority||0, stream:!!body.stream, onChunk: body.stream ? (text) => { if (first) { chunk({ role: 'assistant', content: '' }); first = false; } chunk({ content: text }); } : undefined });
       settleTokens(result.usage);settleKey?.(result.usage);settled=true;
       if (body.stream) { chunk({}, result.finishReason); if(body.stream_options?.include_usage===true)res.write('data: '+JSON.stringify({id,object:'chat.completion.chunk',created,model,choices:[],usage:{...result.usage,total_tokens:result.usage.prompt_tokens+result.usage.completion_tokens}})+'\n\n');res.end('data: [DONE]\n\n'); }
       else res.end(JSON.stringify({ id, object: 'chat.completion', created, model, choices: [{ index: 0, message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }], usage: { ...result.usage, total_tokens: result.usage.prompt_tokens + result.usage.completion_tokens } }));
