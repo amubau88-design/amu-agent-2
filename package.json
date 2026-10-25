@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -31,7 +31,8 @@
     "test:session7": "node src/tests/session7-operations.test.mjs && node --experimental-strip-types src/tests/session7-acceptance.test.ts",
     "test:session8": "node --experimental-strip-types src/tests/session8-management.test.mjs && node --experimental-strip-types src/tests/session8-events.test.ts",
     "test:session9": "node --experimental-strip-types src/tests/session9-access.test.mjs && node --experimental-strip-types src/tests/session9-dashboard.test.mjs",
-    "test:session10": "node --experimental-strip-types src/tests/session10-coding.test.mjs && node --experimental-strip-types src/tests/session10-agent.test.mjs && node --experimental-strip-types src/tests/session10-dashboard.test.mjs && node --experimental-strip-types src/tests/session10-template.test.mjs"
+    "test:session10": "node --experimental-strip-types src/tests/session10-coding.test.mjs && node --experimental-strip-types src/tests/session10-agent.test.mjs && node --experimental-strip-types src/tests/session10-dashboard.test.mjs && node --experimental-strip-types src/tests/session10-template.test.mjs",
+    "test:session11": "node src/tests/session11-development.test.mjs && node src/tests/session11-dashboard.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",

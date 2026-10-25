@@ -18,6 +18,9 @@ import { requireRole } from '../central/permissions.ts';
 import { amuInference } from '../inference/engine.ts';
 import {codingManagementRoute} from '../inference/coding-management.ts';
 import {listWorkspaces,registerWorkspace,configureWorkspace,executeCodingTool,toolAudit,assertTaskWorkspaceScope} from '../core/workspaces.ts';
+import {createChangeSet,listChangeSets,readChangeSet,actOnChangeSet} from '../core/change-sets.ts';
+import {developmentGit} from '../core/development-git.ts';
+import {runnerCapabilities,listTestReports,runDevelopmentTest,cancelTest} from '../core/development-runner.ts';
 
 export function createAmuApiServer(): http.Server {
   validateNetworkConfiguration();
@@ -59,12 +62,23 @@ export function createAmuApiServer(): http.Server {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
       if(await codingManagementRoute(req,res,pathname,body,client.admin))return;
+      if(pathname.startsWith('/api/core/change-sets/')||pathname==='/api/core/runner'||pathname.startsWith('/api/core/test-runs/')){
+        requireScope(client,'core:tasks');requireRole(client,['admin','developer']);let result;
+        if(pathname==='/api/core/runner'&&req.method==='GET')result=runnerCapabilities();
+        else if(/^\/api\/core\/test-runs\/[a-f0-9-]{36}\/cancel$/.test(pathname)&&req.method==='POST')result=cancelTest(pathname.split('/').at(-2)!,client.id,client.admin);
+        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}$/.test(pathname)&&req.method==='GET')result=readChangeSet(pathname.split('/').at(-1)!,client.id,client.admin);
+        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/(apply|restore|reject)$/.test(pathname)&&req.method==='POST')result=actOnChangeSet(pathname.split('/').at(-2)!,pathname.split('/').at(-1)!,body,client.id,client.admin);
+        else throw new ApiError(404,'Unknown development endpoint');res.end(JSON.stringify(result));return;
+      }
       if(pathname.startsWith('/api/core/workspaces')||pathname==='/api/core/tool-audit'){
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);let result;
         if(pathname==='/api/core/workspaces'&&req.method==='GET')result=listWorkspaces(client.id,client.admin);
         else if(pathname==='/api/core/workspaces'&&req.method==='POST'){requireAdmin(client);result=registerWorkspace(body,client.id);}
         else if(pathname==='/api/core/tool-audit'&&req.method==='GET'){requireAdmin(client);result=toolAudit();}
         else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/configure$/.test(pathname)&&req.method==='POST'){requireAdmin(client);result=configureWorkspace(pathname.split('/').at(-2)!,body);}
+        else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/changes$/.test(pathname)){const id=pathname.split('/').at(-2)!;if(req.method==='GET')result=listChangeSets(id,client.id,client.admin);else if(req.method==='POST')result=createChangeSet(id,body,client.id,client.admin);else throw new ApiError(405,'Method not allowed');}
+        else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/git\/(status|copy|commit)$/.test(pathname)&&req.method==='POST')result=await developmentGit(pathname.split('/').at(-3)!,pathname.split('/').at(-1)!,body,client.id,client.admin);
+        else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/tests$/.test(pathname)){const id=pathname.split('/').at(-2)!;if(req.method==='GET')result=listTestReports(id,client.id,client.admin);else if(req.method==='POST'){const disconnect=new AbortController();res.once('close',()=>{if(!res.writableEnded)disconnect.abort();});result=await runDevelopmentTest(id,body,client.id,client.admin,disconnect.signal);}else throw new ApiError(405,'Method not allowed');}
         else if(/^\/api\/core\/workspaces\/[a-f0-9-]{36}\/tools$/.test(pathname)&&req.method==='POST'){const controller=new AbortController(),disconnect=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnect);try{result=await executeCodingTool(pathname.split('/').at(-2)!,body,client.id,client.admin,AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]));}finally{res.off('close',disconnect);}}
         else throw new ApiError(404,'Unknown workspace endpoint');res.end(JSON.stringify(result));return;
       }
