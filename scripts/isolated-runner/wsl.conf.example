@@ -1,0 +1,11 @@
+# Merge only in the dedicated AMU runner distro after explicit setup approval.
+[boot]
+systemd=true
+[automount]
+enabled=false
+mountFsTab=false
+[interop]
+enabled=false
+appendWindowsPath=false
+[user]
+default=amu-runner

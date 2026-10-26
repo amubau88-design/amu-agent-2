@@ -1,0 +1,16 @@
+# User service only; substitute absolute existing paths after independent review.
+[Unit]
+Description=AMU isolated runner (mutual TLS)
+After=docker.service
+Requires=docker.service
+[Service]
+Type=simple
+WorkingDirectory=/home/amu-runner/amu-runner
+Environment=AMU_ISOLATED_RUNNER_CONFIG=/home/amu-runner/private/config.json
+ExecStart=/usr/local/bin/node scripts/isolated-runner.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+[Install]
+WantedBy=default.target
