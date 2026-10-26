@@ -1,4 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {spawn} from 'node:child_process';
+import os from 'node:os';
 import {hash,validateProfile,validateManifest,type RunnerProfile,type ManifestFile} from './protocol.ts';
 
 export type RuntimeConfig={dockerExecutable:string;dockerSha256:string;socket:string;imageId:string;workRoot:string};
@@ -21,6 +22,7 @@ export class DockerRuntime {
  private busy=false;private quarantined=false;
  readonly config:RuntimeConfig;
  constructor(config:RuntimeConfig){this.config=config;}
+ checkResources(profile:RunnerProfile){validateProfile(profile);if(profile.limits.cpuCount>os.availableParallelism()||profile.limits.memoryMiB*1048576+512*1048576>os.freemem())throw Error('Runner CPU/RAM budget insufficient after 512 MiB host reserve');}
  private environment(){return {PATH:'/usr/local/bin:/usr/bin:/bin',DOCKER_CONFIG:path.join(this.config.workRoot,'docker-config')};}
  private async command(args:string[],timeout:number,limit=65536,signal?:AbortSignal):Promise<ProcessResult>{
   if(hash(fs.readFileSync(this.config.dockerExecutable))!==this.config.dockerSha256)throw Error('Docker executable hash changed');
@@ -41,7 +43,7 @@ export class DockerRuntime {
  async execute(profile:RunnerProfile,files:ManifestFile[],contents:string[],signal?:AbortSignal,mode:'project'|'acceptance'|'acceptance-memory'='project'){
   if(this.busy||this.quarantined)throw Error('Runner busy or quarantined after incomplete cleanup');validateProfile(profile);validateManifest(files);if(contents.length!==files.length)throw Error('Source list mismatch');for(let i=0;i<files.length;i++)if(typeof contents[i]!=='string'||Buffer.byteLength(contents[i])!==files[i].bytes||hash(contents[i])!==files[i].sha256)throw Error('Source hash/size mismatch');
   this.busy=true;let directory='',container='';let cleanupVerified=false;
-  try{await this.prerequisites();signal?.throwIfAborted();const id=crypto.randomUUID();container='amu-run-'+id;directory=path.join(this.config.workRoot,id);fs.mkdirSync(directory,{mode:0o755});for(let i=0;i<files.length;i++){const target=path.join(directory,files[i].path);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o755});fs.writeFileSync(target,contents[i],{flag:'wx',mode:0o444});}
+  try{await this.prerequisites();this.checkResources(profile);signal?.throwIfAborted();const id=crypto.randomUUID();container='amu-run-'+id;directory=path.join(this.config.workRoot,id);fs.mkdirSync(directory,{mode:0o755});for(let i=0;i<files.length;i++){const target=path.join(directory,files[i].path);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o755});fs.writeFileSync(target,contents[i],{flag:'wx',mode:0o444});}
    const result=await this.command(dockerArguments(this.config,container,directory,profile,mode),profile.limits.wallTimeMs,profile.limits.outputBytes,signal);let oomKilled=false;if(!result.reason){const inspected=await this.command(['--host',this.config.socket,'inspect','--format','{{json .State}}',container],5000);if(inspected.code!==0||inspected.reason)throw Error('Container result inspection failed');oomKilled=JSON.parse(inspected.stdout).OOMKilled===true;}return {...result,status:result.reason|| (oomKilled?'oom_killed':result.code===0?'passed':'failed'),oomKilled,sourceExecuted:mode==='project',containerId:container};
   }finally{
    if(container){try{const removed=await this.command(['--host',this.config.socket,'rm','--force',container],5000);const listing=await this.command(['--host',this.config.socket,'ps','--all','--filter','name=^/'+container+'$','--format','{{.Names}}'],5000);cleanupVerified=removed.code===0&&!removed.reason&&listing.code===0&&!listing.reason&&!listing.stdout.trim();}catch{/* quarantine: do not claim cancellation or cleanup succeeded */}if(!cleanupVerified)this.quarantined=true;}

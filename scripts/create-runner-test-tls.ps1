@@ -5,7 +5,8 @@ $projectRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $target=[IO.Path]::GetFullPath($Directory)
 $prefix13=Join-Path $projectRoot 'scratch/session13-runner-test-'
 $prefix14=Join-Path $projectRoot 'scratch/session14-runner-test-'
-if(-not ($target.StartsWith($prefix13,[StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($prefix14,[StringComparison]::OrdinalIgnoreCase))){throw 'Only a session13/session14-runner-test fixture directory is allowed'}
+$prefix15=Join-Path $projectRoot 'scratch/session15-runner-test-'
+if(-not ($target.StartsWith($prefix13,[StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($prefix14,[StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($prefix15,[StringComparison]::OrdinalIgnoreCase))){throw 'Only a session13/session14/session15-runner-test fixture directory is allowed'}
 if([IO.Directory]::Exists($target)){throw 'TLS fixture target already exists; preserved'}
 [IO.Directory]::CreateDirectory($target)|Out-Null
 $now=[DateTimeOffset]::UtcNow

@@ -5,7 +5,7 @@ import type {ApprovedExecutionProfile,IsolatedRunnerAdapter} from './isolated-ru
 /** Runtime validation for future adapters. This policy never launches a process or enables a backend. */
 export function validateExecutionProfile(value:any):ApprovedExecutionProfile{
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['id','kind','executable','arguments','approvalDigest','approvedBy','limits'].includes(k)))throw new EngineError(400,'Invalid runner profile');
- if(typeof value.id!=='string'||!/^[a-z0-9-]{1,64}$/.test(value.id)||!['unit','integration','build'].includes(value.kind)||!['node','npm','python'].includes(value.executable))throw new EngineError(400,'Unsupported runner command profile');
+ if(typeof value.id!=='string'||!/^[a-z0-9-]{1,64}$/.test(value.id)||!['unit','integration','build','typecheck'].includes(value.kind)||!['node','npm','python'].includes(value.executable))throw new EngineError(400,'Unsupported runner command profile');
  if(!Array.isArray(value.arguments)||!value.arguments.length||value.arguments.length>24||value.arguments.some((v:any)=>typeof v!=='string'||v.length>500||/[\0\r\n]/.test(v)))throw new EngineError(400,'Runner requires bounded literal arguments');
  const ranges={wallTimeMs:[1000,120000],memoryMiB:[128,4096],cpuCount:[1,4],processCount:[1,64],outputBytes:[1024,65536]};
  if(!value.limits||typeof value.limits!=='object'||Array.isArray(value.limits)||Object.keys(value.limits).length!==Object.keys(ranges).length)throw new EngineError(400,'Complete resource limits required');

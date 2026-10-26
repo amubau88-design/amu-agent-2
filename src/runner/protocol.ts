@@ -2,14 +2,14 @@ import crypto from 'node:crypto';
 
 export const hash = (value:string|Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 export const uuid = (value:unknown):value is string => typeof value==='string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
-export type RunnerProfile={id:string;kind:'build'|'unit'|'integration';executable:'node'|'npm';arguments:string[];limits:{wallTimeMs:number;memoryMiB:number;cpuCount:number;processCount:number;outputBytes:number}};
+export type RunnerProfile={id:string;kind:'build'|'unit'|'integration'|'typecheck';executable:'node'|'npm';arguments:string[];limits:{wallTimeMs:number;memoryMiB:number;cpuCount:number;processCount:number;outputBytes:number}};
 export type ManifestFile={path:string;sha256:string;bytes:number};
 export function sourcePath(value:unknown):asserts value is string {
  if(typeof value!=='string'||value.length>180||!value.split('/').every(p=>/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(p)&&!['node_modules','secrets','backups'].includes(p.toLowerCase()))||value.includes(':'))throw Error('Invalid runner source path');
 }
 export function profileDigest(profile:RunnerProfile){return hash(JSON.stringify({id:profile.id,kind:profile.kind,executable:profile.executable,arguments:profile.arguments,limits:Object.fromEntries(['wallTimeMs','memoryMiB','cpuCount','processCount','outputBytes'].map(k=>[k,profile.limits[k as keyof typeof profile.limits]]))}));}
 export function validateProfile(value:any):RunnerProfile {
- if(!value||Object.keys(value).sort().join()!==['arguments','executable','id','kind','limits'].sort().join()||!/^[a-z0-9-]{1,64}$/.test(value.id)||!['build','unit','integration'].includes(value.kind))throw Error('Invalid fixed runner profile');
+ if(!value||Object.keys(value).sort().join()!==['arguments','executable','id','kind','limits'].sort().join()||!/^[a-z0-9-]{1,64}$/.test(value.id)||!['build','unit','integration','typecheck'].includes(value.kind))throw Error('Invalid fixed runner profile');
  const ranges={wallTimeMs:[1000,120000],memoryMiB:[128,4096],cpuCount:[1,4],processCount:[4,64],outputBytes:[1024,32768]};
  if(!value.limits||Object.keys(value.limits).sort().join()!==Object.keys(ranges).sort().join())throw Error('Complete runner limits required');
  for(const [k,[min,max]]of Object.entries(ranges))if(!Number.isInteger(value.limits[k])||value.limits[k]<min||value.limits[k]>max)throw Error('Unsafe runner limit: '+k);

@@ -1,6 +1,6 @@
 /** Contract for a future OS-isolated backend. No backend is enabled by this declaration. */
 export type ApprovedExecutionProfile={
- id:string;kind:'unit'|'integration'|'build';
+ id:string;kind:'unit'|'integration'|'build'|'typecheck';
  executable:string;arguments:readonly string[];
  approvalDigest:string;approvedBy:string;
  limits:{wallTimeMs:number;memoryMiB:number;cpuCount:number;processCount:number;outputBytes:number};
