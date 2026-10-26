@@ -4,6 +4,28 @@ import {hash,validateProfile,validateManifest,type RunnerProfile,type ManifestFi
 
 export type RuntimeConfig={dockerExecutable:string;dockerSha256:string;socket:string;imageId:string;workRoot:string};
 export type ProcessResult={code:number|null;stdout:string;stderr:string;reason?:'cancelled'|'timed_out'|'output_limit'};
+export type HostBoundaryObservation={platform:string;uid:number;pidOne:string;groups:string[];wsl:boolean;stateRoot:string;wslConfiguration?:string;mounts?:string;windowsInteropRegistered?:boolean};
+/** This policy is mandatory in the actual adapter, not merely an optional deployment probe. */
+export function assertHostBoundaryObservation(o:HostBoundaryObservation){
+ if(o.platform!=='linux'||!Number.isInteger(o.uid)||o.uid<=0||o.pidOne!=='systemd'||typeof o.wsl!=='boolean'||!Array.isArray(o.groups)||o.groups.some(g=>['sudo','wheel','docker'].includes(g)))throw Error('Dedicated non-root systemd host without administrative groups required');
+ if(!path.posix.isAbsolute(o.stateRoot))throw Error('Linux-native runner state required');
+ if(!o.wsl)return;
+ let section='';const values:Record<string,string>={};for(const raw of (o.wslConfiguration||'').split('\n')){const line=raw.split('#')[0].trim().toLowerCase();if(/^\[.+\]$/.test(line)){section=line.slice(1,-1);continue;}const separator=line.indexOf('=');if(separator>0)values[section+'.'+line.slice(0,separator).trim()]=line.slice(separator+1).trim();}
+ if(values['boot.systemd']!=='true'||values['automount.enabled']!=='false'||values['automount.mountfstab']!=='false'||values['interop.enabled']!=='false'||values['interop.appendwindowspath']!=='false')throw Error('Dedicated WSL must explicitly disable Windows automount, fstab and interoperability');
+ if(typeof o.mounts!=='string'||/\s(?:9p|drvfs)\s/i.test(o.mounts)||o.windowsInteropRegistered!==false||/^\/mnt\/[a-z](\/|$)/i.test(o.stateRoot))throw Error('Windows shares, interoperability or Windows-mounted runner state are forbidden');
+}
+export function assertLinuxHostBoundary(stateRoot:string){
+ if(process.platform!=='linux'||!process.getuid||process.getuid()===0)throw Error('Dedicated non-root Linux runner required');
+ const ids=new Set([process.getgid!(),...process.getgroups!()]),groups=fs.readFileSync('/etc/group','utf8').split('\n').filter(line=>ids.has(Number(line.split(':')[2]))).map(line=>line.split(':')[0]);
+ const wsl=/microsoft/i.test(fs.readFileSync('/proc/version','utf8'));
+ assertHostBoundaryObservation({platform:process.platform,uid:process.getuid(),pidOne:fs.readFileSync('/proc/1/comm','utf8').trim(),groups,wsl,stateRoot,...(wsl?{wslConfiguration:fs.readFileSync('/etc/wsl.conf','utf8'),mounts:fs.readFileSync('/proc/mounts','utf8'),windowsInteropRegistered:fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')}:{})});
+}
+export const runnerDiskReserveBytes=2n*1024n**3n;
+export function assertRunnerFreeSpace(stats:{bsize:number|bigint;bavail:number|bigint}){
+ const integer=(v:number|bigint)=>typeof v==='bigint'?v:typeof v==='number'&&Number.isSafeInteger(v)?BigInt(v):-1n;
+ const block=integer(stats.bsize),available=integer(stats.bavail);if(block<=0n||available<0n||block*available<runnerDiskReserveBytes)throw Error('At least 2 GiB unprivileged free space required for runner state');
+ return {availableBytes:(block*available).toString(),minimumBytes:runnerDiskReserveBytes.toString()};
+}
 export function safeDirectory(dir:string){if(!path.isAbsolute(dir)||dir.includes(',')||dir.includes('\0'))throw Error('Absolute plain runner directory required');for(let p=dir;;p=path.dirname(p)){if(fs.existsSync(p)&&fs.lstatSync(p).isSymbolicLink())throw Error('Linked runner directory');if(path.dirname(p)===p)break;}if(!fs.existsSync(dir)||!fs.statSync(dir).isDirectory())throw Error('Runner directory must already exist');}
 export function cleanupInput(root:string,id:string,files:ManifestFile[]){
  if(!/^[a-f0-9-]{36}$/.test(id))throw Error('Invalid owned snapshot identity');validateManifest(files);safeDirectory(root);const directory=path.join(root,id);safeDirectory(directory);
@@ -22,7 +44,7 @@ export class DockerRuntime {
  private busy=false;private quarantined=false;
  readonly config:RuntimeConfig;
  constructor(config:RuntimeConfig){this.config=config;}
- checkResources(profile:RunnerProfile){validateProfile(profile);if(profile.limits.cpuCount>os.availableParallelism()||profile.limits.memoryMiB*1048576+512*1048576>os.freemem())throw Error('Runner CPU/RAM budget insufficient after 512 MiB host reserve');}
+ checkResources(profile:RunnerProfile){validateProfile(profile);if(profile.limits.cpuCount>os.availableParallelism()||profile.limits.memoryMiB*1048576+512*1048576>os.freemem())throw Error('Runner CPU/RAM budget insufficient after 512 MiB host reserve');assertRunnerFreeSpace(fs.statfsSync(this.config.workRoot));}
  private environment(){return {PATH:'/usr/local/bin:/usr/bin:/bin',DOCKER_CONFIG:path.join(this.config.workRoot,'docker-config')};}
  private async command(args:string[],timeout:number,limit=65536,signal?:AbortSignal):Promise<ProcessResult>{
   if(hash(fs.readFileSync(this.config.dockerExecutable))!==this.config.dockerSha256)throw Error('Docker executable hash changed');
@@ -32,7 +54,8 @@ export class DockerRuntime {
  async prerequisites(){
   if(this.quarantined)throw Error('Runner quarantined after uncertain cleanup; controlled restart/recovery required');
   if(process.platform!=='linux'||!process.getuid||process.getuid()===0)throw Error('Requires a dedicated non-root Linux runner; host execution is forbidden');
-  const c=this.config;safeDirectory(c.workRoot);if(fs.statSync(c.workRoot).uid!==process.getuid()||(fs.statSync(c.workRoot).mode&0o077)!==0)throw Error('Runner state must be owned by the dedicated user with mode 0700');if(!path.isAbsolute(c.dockerExecutable)||fs.lstatSync(c.dockerExecutable).isSymbolicLink()||!/^[a-f0-9]{64}$/.test(c.dockerSha256))throw Error('Pin the existing Docker executable');
+  assertLinuxHostBoundary(this.config.workRoot);
+  const c=this.config;safeDirectory(c.workRoot);if(fs.statSync(c.workRoot).uid!==process.getuid()||(fs.statSync(c.workRoot).mode&0o077)!==0)throw Error('Runner state must be owned by the dedicated user with mode 0700');assertRunnerFreeSpace(fs.statfsSync(c.workRoot));if(!path.isAbsolute(c.dockerExecutable)||fs.lstatSync(c.dockerExecutable).isSymbolicLink()||!/^[a-f0-9]{64}$/.test(c.dockerSha256))throw Error('Pin the existing Docker executable');
   if(c.socket!=='unix:///run/user/'+process.getuid()+'/docker.sock'||!fs.statSync(c.socket.slice(7)).isSocket()||fs.statSync(c.socket.slice(7)).uid!==process.getuid())throw Error('Only the dedicated user rootless Docker socket is allowed');
   const configDir=path.join(c.workRoot,'docker-config');if(!fs.existsSync(configDir))fs.mkdirSync(configDir,{mode:0o700});safeDirectory(configDir);if(fs.readdirSync(configDir).length)throw Error('Docker client configuration must remain empty; registry credentials are forbidden');
   const info=await this.command(['--host',c.socket,'info','--format','{{json .}}'],5000);if(info.code!==0||info.reason)throw Error('Rootless Docker is unavailable');const data=JSON.parse(info.stdout);
