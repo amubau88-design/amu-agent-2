@@ -1,10 +1,12 @@
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {EngineError} from '../inference/models.ts';
+import {runnerReadiness} from './runner-readiness.ts';
 import {configureRemoteRunner,remoteRunnerStatus,probeRemoteRunner} from './remote-runner.ts';
 import {runnerProfiles,previewRunnerProfile,prepareRunnerProfile,createRunnerSnapshot,listRunnerSnapshots,runnerValidationHistory,validateSnapshotRemotely,cleanupRunnerSnapshot,cancelRunnerValidation} from './runner-preflight.ts';
 export async function runnerManagementRoute(req:IncomingMessage,res:ServerResponse,pathname:string,body:any,owner:string,admin:boolean){
  if(!pathname.startsWith('/api/core/runner/'))return false;let result:any;const administrator=()=>{if(!admin)throw new EngineError(403,'Administrator permission required');};
- if(pathname==='/api/core/runner/remote'&&req.method==='GET'){administrator();result=remoteRunnerStatus();}
+ if(pathname==='/api/core/runner/readiness'&&req.method==='GET'){administrator();result=runnerReadiness();}
+ else if(pathname==='/api/core/runner/remote'&&req.method==='GET'){administrator();result=remoteRunnerStatus();}
  else if(pathname==='/api/core/runner/remote'&&req.method==='POST'){administrator();result=configureRemoteRunner(body);}
  else if(pathname==='/api/core/runner/remote/probe'&&req.method==='POST'){administrator();result=await probeRemoteRunner();}
  else if(pathname==='/api/core/runner/profiles/preview'&&req.method==='POST'){administrator();result=previewRunnerProfile(body,owner);}
