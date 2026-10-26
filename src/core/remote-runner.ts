@@ -1,0 +1,54 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import https from 'node:https';
+import tls from 'node:tls';
+import net from 'node:net';
+import {coreDirectory,contentHash} from './tools.ts';
+import {writePrivateJson} from '../central/storage.ts';
+import {EngineError} from '../inference/models.ts';
+
+type Connection={endpoint:string;serverId:string;certificateSha256:string;caFile:string;certificateFile:string;keyFile:string};
+const directory=path.join(coreDirectory,'external-runner');fs.mkdirSync(directory,{recursive:true});
+const configFile=path.join(directory,'connection.json'),probeFile=path.join(directory,'probe.json');
+const networks=new net.BlockList();for(const [ip,bits] of [['127.0.0.0',8],['10.0.0.0',8],['172.16.0.0',12],['192.168.0.0',16]] as const)networks.addSubnet(ip,bits);networks.addAddress('::1','ipv6');networks.addSubnet('fc00::',7,'ipv6');
+function credentials(relative:unknown){
+ const root=path.resolve(process.env.AMU_CENTRAL_STATE_DIR||'scratch/secrets');
+ if(typeof relative!=='string'||!relative.endsWith('.pem')||relative.includes('\\')||relative.split('/').some(p=>!p||p.startsWith('.')||p.includes(':'))||path.isAbsolute(relative))throw new EngineError(400,'Runner TLS files must be plain relative PEM paths inside the private state directory');
+ const target=path.join(root,relative);for(let cursor=target;cursor!==root;cursor=path.dirname(cursor)){if(!fs.existsSync(cursor)||fs.lstatSync(cursor).isSymbolicLink())throw new EngineError(400,'Missing or linked runner credential path');}
+ if(!fs.statSync(target).isFile()||fs.statSync(target).size>65536)throw new EngineError(400,'Invalid runner credential file');return fs.readFileSync(target);
+}
+export function validateRunnerConnection(value:any):Connection{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['endpoint','serverId','certificateSha256','caFile','certificateFile','keyFile','approve'].includes(k)))throw new EngineError(400,'Invalid runner connection');
+ let url:URL;try{url=new URL(value.endpoint);}catch{throw new EngineError(400,'Invalid runner endpoint');}const host=url.hostname.replace(/^\[|\]$/g,'');
+ if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash||!net.isIP(host)||!networks.check(host,net.isIP(host)===6?'ipv6':'ipv4'))throw new EngineError(400,'Runner requires HTTPS and an explicit private IP; public, metadata and DNS targets are forbidden');
+ if(typeof value.serverId!=='string'||!/^[a-f0-9-]{36}$/.test(value.serverId)||typeof value.certificateSha256!=='string'||!/^[a-f0-9]{64}$/i.test(value.certificateSha256))throw new EngineError(400,'Runner identity and certificate SHA-256 required');
+ const ca=credentials(value.caFile),cert=credentials(value.certificateFile),key=credentials(value.keyFile);try{new crypto.X509Certificate(ca);if(!new crypto.X509Certificate(cert).checkPrivateKey(crypto.createPrivateKey(key)))throw Error();}catch{throw new EngineError(400,'Invalid or mismatched runner TLS credentials');}
+ return {endpoint:url.origin,serverId:value.serverId,certificateSha256:value.certificateSha256.toLowerCase(),caFile:value.caFile,certificateFile:value.certificateFile,keyFile:value.keyFile};
+}
+function connection(){if(!fs.existsSync(configFile))throw new EngineError(503,'External runner is not configured');return validateRunnerConnection(JSON.parse(fs.readFileSync(configFile,'utf8')));}
+export function configureRemoteRunner(body:any){if(body?.approve!==true)throw new EngineError(403,'Explicit administrator approval required');const config=validateRunnerConnection(body);writePrivateJson(configFile,config,true);if(fs.existsSync(probeFile))fs.unlinkSync(probeFile);return remoteRunnerStatus();}
+export function remoteRunnerStatus(){let config:any=null;try{if(fs.existsSync(configFile))config=JSON.parse(fs.readFileSync(configFile,'utf8'));}catch{return {configured:true,configurationError:true,executionEnabled:false,isolationVerified:false};}return {configured:!!config,connection:config,lastProbe:fs.existsSync(probeFile)?JSON.parse(fs.readFileSync(probeFile,'utf8')):null,authentication:'mutual-tls',executionEnabled:false,isolationVerified:false,reason:'Transport und gemeldete Fähigkeiten ersetzen keine unabhängige Isolationsabnahme. Projektcode bleibt gesperrt.'};}
+async function request(route:'/runner/v1/capabilities'|'/runner/v1/validate',body:object,signal?:AbortSignal){
+ const config=connection(),data=JSON.stringify(body);if(Buffer.byteLength(data)>512*1024)throw new EngineError(413,'Runner request exceeds limit');
+ const combined=AbortSignal.any([AbortSignal.timeout(5000),...(signal?[signal]:[])]);
+ return new Promise<any>((resolve,reject)=>{
+  const req=https.request(new URL(route,config.endpoint),{agent:false,method:'POST',minVersion:'TLSv1.2',rejectUnauthorized:true,ca:credentials(config.caFile),cert:credentials(config.certificateFile),key:credentials(config.keyFile),signal:combined,headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(data)},checkServerIdentity:(host,cert)=>tls.checkServerIdentity(host,cert)||(crypto.createHash('sha256').update(cert.raw).digest('hex')===config.certificateSha256?undefined:new Error('Runner certificate pin mismatch'))},res=>{
+   const chunks:Buffer[]=[];let size=0;res.on('data',chunk=>{size+=chunk.length;if(size>65536){res.destroy();reject(new EngineError(502,'Runner response exceeds 64 KiB'));}else chunks.push(chunk);});res.on('error',()=>reject(new EngineError(503,'Runner response interrupted; request was not replayed')));res.on('end',()=>{if(res.statusCode!==200||!/^application\/json\b/i.test(String(res.headers['content-type'])))return reject(new EngineError(502,'Runner refused the fixed JSON protocol; redirects are forbidden'));try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{reject(new EngineError(502,'Incomplete runner JSON response'));}});
+  });req.on('error',()=>reject(new EngineError(combined.aborted?504:503,'Secure runner connection failed or timed out; request was not replayed')));req.end(data);
+ });
+}
+async function performProbe(signal?:AbortSignal){
+ const config=connection(),challenge=crypto.randomUUID(),value=await request('/runner/v1/capabilities',{protocolVersion:1,challenge},signal);
+ const flags=['networkDisabled','unprivileged','credentialsAbsent','resourceLimitsEnforced','processTreeCancellation','disposableFilesystem'];
+ if(value?.protocolVersion!==1||value.serverId!==config.serverId||value.challenge!==challenge||typeof value.runtimeVersion!=='string'||!value.runtimeVersion||value.runtimeVersion.length>100||!value.isolation||flags.some(k=>typeof value.isolation[k]!=='boolean'))throw new EngineError(502,'Invalid runner identity, nonce or capability schema');
+ const observation={serverId:value.serverId,runtimeVersion:value.runtimeVersion,reportedIsolation:Object.fromEntries(flags.map(k=>[k,value.isolation[k]])),transportAuthenticated:true,allRequirementsReported:flags.every(k=>value.isolation[k]===true),probedAt:new Date().toISOString(),isolationVerified:false,executionEnabled:false};writePrivateJson(probeFile,{...observation,evidenceDigest:contentHash(JSON.stringify(observation))},true);return remoteRunnerStatus();
+}
+/** Metadata-only compatibility request: never uploads source, credentials, environment or host paths. */
+export async function validateRemoteManifest(payload:{runId:string;snapshotDigest:string;profileDigest:string;files:{path:string;sha256:string;bytes:number}[];profile:object},signal?:AbortSignal){
+ const config=connection(),challenge=crypto.randomUUID(),result=await request('/runner/v1/validate',{protocolVersion:1,operation:'validate-only',challenge,...payload},signal);
+ if(result?.protocolVersion!==1||result.serverId!==config.serverId||result.challenge!==challenge||result.runId!==payload.runId||result.snapshotDigest!==payload.snapshotDigest||result.profileDigest!==payload.profileDigest||typeof result.accepted!=='boolean'||result.executed!==false)throw new EngineError(502,'Runner validation response is not bound to the request, or falsely reports execution');
+ return {accepted:result.accepted,executed:false,validationOnly:true,serverId:result.serverId,snapshotDigest:payload.snapshotDigest,profileDigest:payload.profileDigest};
+}
+
+export async function probeRemoteRunner(signal?:AbortSignal){try{return await performProbe(signal);}catch(error){writePrivateJson(probeFile,{status:'failed',probedAt:new Date().toISOString(),transportAuthenticated:false,isolationVerified:false,executionEnabled:false,error:error instanceof EngineError?error.message:'Runner probe failed'},true);throw error;}}

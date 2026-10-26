@@ -20,6 +20,7 @@ export async function developmentGit(id:string,action:string,body:any,owner:stri
  const w=workspace(id,owner,admin);if(!w.tools.includes('git_status'))throw new EngineError(403,'Git permission required');
  return caller.run(owner,()=>lock(id,async()=>{
   if(action==='status'){const cwd=base(w);try{const repository=await git(cwd,['rev-parse','--show-toplevel']),branch=await git(cwd,['symbolic-ref','--short','-q','HEAD']).catch(()=>'(detached)'),status=await git(cwd,['--no-optional-locks','status','--porcelain=v1','--untracked-files=normal','--','.']);return {workspaceId:id,repository,branch,status,statusHash:contentHash(status),managed:fs.existsSync(path.join(markers,w.id+'.json')),readOnly:true};}catch(error){if(error instanceof EngineError)throw error;throw new EngineError(409,'Git repository unavailable');}}
+  if(action==='prepare_commit'){const cwd=managed(w);if(!Array.isArray(body?.files)||!body.files.length||body.files.length>12)throw new EngineError(400,'Explicit commit files required');const files=body.files.map((name:any)=>{const p=scopedPath(w,name);return {path:name,sha256:fs.existsSync(p.target)?readControlled(p.relative).sha256:null};});if(await git(cwd,['diff','--cached','--name-only']))throw new EngineError(409,'Existing staged work is protected');const status=await git(cwd,['--no-optional-locks','status','--porcelain=v1','--untracked-files=normal']);return {workspaceId:id,head:await git(cwd,['rev-parse','HEAD']),statusHash:contentHash(status),files,reviewRequired:true,executed:false};}
   if(!admin)throw new EngineError(403,'Administrator approval required');if(w.readOnly)throw new EngineError(403,'Workspace is read-only');
   if(action==='copy'){
    if(body?.approve!==true)throw new EngineError(403,'Explicit working-copy approval required');if(!w.tools.includes('read_file'))throw new EngineError(403,'Read permission required');const listing=listFiles(w);if(listing.truncated||listing.files.length>200)throw new EngineError(413,'Working copy limited to 200 complete source files');
@@ -44,3 +45,5 @@ export async function developmentGit(id:string,action:string,body:any,owner:stri
   throw new EngineError(400,'Unknown development Git action');
  }));
 }
+
+export const assertManagedWorkspace=(w:ReturnType<typeof workspace>)=>managed(w);

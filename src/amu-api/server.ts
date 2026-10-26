@@ -1,3 +1,5 @@
+import {candidateCheck,checkCandidate} from '../core/candidate-checks.ts';
+import {runnerManagementRoute} from '../core/runner-routes.ts';
 import {gitRuntimeStatus,configureGitRuntime} from '../core/git-runtime.ts';
 import {agentToolCatalog} from '../core/agent-tools.ts';
 import {platform} from '../central/platform.ts';
@@ -64,10 +66,12 @@ export function createAmuApiServer(): http.Server {
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
       if(await codingManagementRoute(req,res,pathname,body,client.admin))return;
+      if(pathname.startsWith('/api/core/runner/')){requireScope(client,'core:tasks');requireRole(client,['admin','developer']);if(await runnerManagementRoute(req,res,pathname,body,client.id,client.admin))return;}
       if(pathname.startsWith('/api/core/change-sets/')||pathname==='/api/core/runner'||pathname.startsWith('/api/core/test-runs/')){
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);let result;
         if(pathname==='/api/core/runner'&&req.method==='GET')result=runnerCapabilities();
         else if(/^\/api\/core\/test-runs\/[a-f0-9-]{36}\/cancel$/.test(pathname)&&req.method==='POST')result=cancelTest(pathname.split('/').at(-2)!,client.id,client.admin);
+        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/checks$/.test(pathname)){const id=pathname.split('/').at(-2)!;if(req.method==='GET')result=candidateCheck(id,client.id,client.admin);else if(req.method==='POST'){const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});result=await checkCandidate(id,client.id,client.admin,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)]));amuCore.reconcileChangeSet(readChangeSet(id,client.id,client.admin));}else throw new ApiError(405,'Method not allowed');}
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}$/.test(pathname)&&req.method==='GET')result=readChangeSet(pathname.split('/').at(-1)!,client.id,client.admin);
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/(apply|restore|reject)$/.test(pathname)&&req.method==='POST'){const packageId=pathname.split('/').at(-2)!,action=pathname.split('/').at(-1)!;amuCore.assertChangeSetAction(readChangeSet(packageId,client.id,client.admin),action);result=actOnChangeSet(packageId,action,body,client.id,client.admin);amuCore.reconcileChangeSet(result);}
         else throw new ApiError(404,'Unknown development endpoint');res.end(JSON.stringify(result));return;
@@ -85,7 +89,7 @@ export function createAmuApiServer(): http.Server {
         else throw new ApiError(404,'Unknown workspace endpoint');res.end(JSON.stringify(result));return;
       }
       if(pathname==='/api/core/git-runtime'){requireAdmin(client);const result=req.method==='GET'?gitRuntimeStatus():req.method==='POST'?configureGitRuntime(body):null;if(!result)throw new ApiError(405,'Method not allowed');res.end(JSON.stringify(result));return;}
-      if(pathname==='/api/core/tools'&&req.method==='GET'){requireScope(client,'core:tasks');requireRole(client,['admin','developer']);res.end(JSON.stringify(agentToolCatalog()));return;}
+      if(pathname==='/api/core/tools'&&req.method==='GET'){requireScope(client,'core:tasks');requireRole(client,['admin','developer']);res.end(JSON.stringify({...agentToolCatalog(),activeModel:amuInference.status().model,runtimeProfile:amuInference.status().runtimeProfile||null}));return;}
       if (pathname.startsWith('/api/core/')) {
         requireScope(client,'core:tasks');requireRole(client,['admin','developer']);
         if(req.method==='POST'&&pathname==='/api/core/tasks'){assertTaskWorkspaceScope(body?.files,body?.workspaceId,client.id,client.admin);if((body?.maxOutputTokens??512)>(client.maxTokens||(client.admin?2048:512)))throw new ApiError(400,'Coding task output token limit exceeds application grant');}
@@ -101,11 +105,13 @@ export function createAmuApiServer(): http.Server {
         try {
           let result;
           if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
+          else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/inspect$/.test(pathname)&&req.method==='POST'){if(body?.version!==1||!['show_diff','request_approval','prepare_commit'].includes(body?.name)||!body.arguments||Object.keys(body.arguments).length)throw new ApiError(400,'Invalid task inspection protocol');result=await amuCore.inspect(pathname.split('/').at(-2)!,body.name,client.id,client.admin);}
+          else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/commit$/.test(pathname)&&req.method==='POST'){requireAdmin(client);result=await amuCore.commit(pathname.split('/').at(-2)!,body,client.id,client.admin);}
           else if (pathname === '/api/core/tasks' && req.method === 'GET') result = amuCore.list(client.id,client.admin);
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.get(pathname.split('/').at(-1)!, client.id,client.admin);
           else if (/^\/api\/core\/proposals\/[a-f0-9-]+$/.test(pathname) && req.method === 'GET') result = amuCore.proposal(pathname.split('/').at(-1)!, client.id,client.admin);
           else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/diff$/.test(pathname) && req.method === 'GET') result=amuCore.diff(pathname.split('/').at(-2)!,client.id,client.admin);
-          else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/resume$/.test(pathname) && req.method === 'POST') { if(body?.acceptSourceChanges)requireAdmin(client);result=amuCore.resume(pathname.split('/').at(-2)!,client.id,body,client.admin);res.statusCode=202; }
+          else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/resume$/.test(pathname) && req.method === 'POST') { if(body?.acceptSourceChanges||body?.acceptModelChange)requireAdmin(client);result=amuCore.resume(pathname.split('/').at(-2)!,client.id,body,client.admin);res.statusCode=202; }
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/cancel$/.test(pathname) && req.method === 'POST') result=amuCore.cancel(pathname.split('/').at(-2)!,client.id,client.admin);
           else if (/^\/api\/core\/tasks\/[a-f0-9-]+\/pause$/.test(pathname) && req.method === 'POST') result=amuCore.pause(pathname.split('/').at(-2)!,client.id,client.admin);
           else if (/^\/api\/core\/proposals\/[a-f0-9-]+\/reject$/.test(pathname) && req.method === 'POST') result=amuCore.reject(pathname.split('/').at(-2)!,client.id,client.admin);

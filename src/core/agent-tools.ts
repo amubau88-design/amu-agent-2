@@ -7,6 +7,9 @@ export const agentTools=[
  {name:'git_status',permission:'git_status',parameters:{}},
  {name:'prepare_changes',permission:'prepare_patch',parameters:{changes:'array'}},
  {name:'run_test',permission:'run_test',parameters:{path:'string'}},
+ {name:'show_diff',permission:'show_diff',parameters:{}},
+ {name:'request_approval',permission:'show_diff',parameters:{}},
+ {name:'prepare_commit',permission:'git_status',parameters:{}},
  {name:'finish',permission:null,parameters:{}},
 ] as const;
 export const agentDecisionSchema={type:'object',properties:{name:{enum:agentTools.map(t=>t.name)},arguments:{type:'object',properties:{path:text,query:text,changes:{type:'array',items:change,minItems:1,maxItems:8}},additionalProperties:false},explanation:text},required:['name','arguments','explanation'],additionalProperties:false};
@@ -36,4 +39,4 @@ export function parseAgentOutput(value:string,format:'amu-json-v1'|'amu-flat-v1'
   if(!Array.isArray(parsed?.tool_calls)||parsed.tool_calls.length!==1)throw new EngineError(422,'Exactly one native tool call required');const call=parsed.tool_calls[0];if(call.type!=='function'||typeof call.function?.arguments!=='string')throw new EngineError(422,'Invalid native call');let args;try{args=JSON.parse(call.function.arguments);}catch{throw new EngineError(422,'Incomplete native arguments');}parsed={name:call.function.name,arguments:args,explanation:'Native function request'};
  }return validateAgentCall(parsed);
 }
-export const agentToolCatalog=()=>({version:1,format:'amu-flat-v1',formats:['amu-flat-v1','amu-json-v1'],nativeToolCalling:false,tools:agentTools,decisionSchema:flatAgentDecisionSchema,description:'Strukturierte JSON-Werkzeugaufrufe; native Modell-Tool-Calls sind nicht freigeschaltet.'});
+export const agentToolCatalog=()=>({version:1,format:'amu-flat-v1',formats:['amu-flat-v1','amu-json-v1'],nativeToolCalling:false,administrativeActions:[{name:'apply_changes',requiresAdministrator:true,requiresExactDigest:true},{name:'restore_changes',requiresAdministrator:true,requiresExactDigest:true},{name:'commit_changes',requiresAdministrator:true,requiresExactDigest:true}],tools:agentTools,decisionSchema:flatAgentDecisionSchema,description:'Strukturierte JSON-Werkzeugaufrufe; native Modell-Tool-Calls sind nicht freigeschaltet.'});

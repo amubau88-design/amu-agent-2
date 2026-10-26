@@ -1,3 +1,6 @@
+import {inspectAgentAction} from './agent-inspection.ts';
+import {requireCandidateCheck} from './candidate-checks.ts';
+import {developmentGit} from './development-git.ts';
 import {writePrivateJson} from '../central/storage.ts';
 import {initializeAgent,agentSources,runCodingAgent,reconcileAgentChangeSet,recoverAgentCheckpoint,type AgentState} from './coding-agent.ts';
 import {platform} from '../central/platform.ts';
@@ -36,10 +39,11 @@ export function recoverInterruptedTasks() {
 }
 const decisions = { type:'object',properties:{ action:{enum:['read_file','analyze_typescript','propose_file','list_files','search_code','run_test','git_status','finish']},file:{type:'string'},content:{type:'string'},explanation:{type:'string'} },required:['action','file','content','explanation'],additionalProperties:false };
 export class AMUCore {
-  isBusy(){return this.active!==null;}
+  isBusy(){return this.active!==null||this.committing;}
+  private committing=false;
   private active: { id: string; controller: AbortController } | null = null;
   private prepare(body: any, owner: string): CoreTask {
-    if (this.active) throw new EngineError(429,'A controlled development task is already running');
+    if (this.active||this.committing) throw new EngineError(429,'A controlled development task is already running');
     if(body?.mode!==undefined&&!['agent','legacy'].includes(body.mode))throw new EngineError(400,'Unknown task mode');if(body?.mode==='agent'&&typeof body.workspaceId!=='string')throw new EngineError(400,'Agent mode requires an explicit workspace');
     if (typeof body?.goal!=='string'||!body.goal.trim()||body.goal.length>2000||!Array.isArray(body.files)||!body.files.length||body.files.length>(body.mode==='agent'?8:4)||body.files.some((f:any)=>typeof f!=='string')) throw new EngineError(400,'Provide a goal and one to four source paths');
     if (body.maxSteps!==undefined&&(!Number.isInteger(body.maxSteps)||body.maxSteps<1||body.maxSteps>12)) throw new EngineError(400,'maxSteps must be between 1 and 12');
@@ -55,7 +59,7 @@ export class AMUCore {
   async create(body:any,owner:string,signal?:AbortSignal):Promise<CoreTask>{const task=this.prepare(body,owner);return this.run(task,signal);}
   submit(body:any,owner:string):CoreTask{const task=this.prepare(body,owner);void this.run(task).catch(e=>recordSystemEvent('core_background_failure',{taskId:task.id,category:e.name}));return task;}
   private async run(task:CoreTask,signal?:AbortSignal):Promise<CoreTask>{
-    if(this.active)throw new EngineError(429,'A controlled development task is already running');
+    if(this.active||this.committing)throw new EngineError(429,'A controlled development task is already running');
     const controller=new AbortController();this.active={id:task.id,controller};
     const taskSignal=AbortSignal.any([controller.signal,AbortSignal.timeout(Math.min(task.timeoutMs||120000,platform.requestTimeoutMs)),...(signal?[signal]:[])]);
     try{
@@ -95,20 +99,23 @@ export class AMUCore {
     return task;
   }
   resume(id:string,owner:string,options:any={},adminOverride=false):CoreTask{
-    if(this.active)throw new EngineError(429,'Another task is running');
+    if(this.active||this.committing)throw new EngineError(429,'Another task is running');
     const task=this.get(id,owner,adminOverride);
     if(!['paused','interrupted','failed','blocked'].includes(task.state))throw new EngineError(409,'Task cannot be resumed in its current state');
     if(task.agent?task.agent.usage.steps>=task.agent.limits.maxTotalSteps:task.steps.filter(s=>s.action!=='apply_approved').length>=20)throw new EngineError(409,'Total task step budget exhausted; create a new scoped task');
     if(task.workspaceId)for(const file of task.files)authorizeWorkspaceFile(task.workspaceId,file,task.owner,'read_file');
     const sources=task.agent?agentSources(task):task.files.map(readControlled);const changes=sources.some(s=>task.sourceHashes?.[s.file]!==s.sha256);
     if(changes&&options.acceptSourceChanges!==true)throw new EngineError(409,'Source differs from checkpoint; explicit re-analysis approval required');
+    if(task.agent&&options.acceptModelChange===true){task.agent.model=amuInference.status().model;task.agent.modelProfileId=(amuInference.status().runtimeProfile as {profileId?:string}|undefined)?.profileId;task.steps.push({action:'model_change_approved',model:task.agent.model,at:new Date().toISOString()});}
     if(task.agent&&options.repair===true){if(task.agent.usage.errors>=task.agent.limits.maxErrors)throw new EngineError(409,'Repair budget exhausted');task.agent.usage.errors++;task.agent.phase='work';delete task.agent.pendingChangeSet;}
     if(changes){task.sourceHashes=Object.fromEntries(sources.map(s=>[s.file,s.sha256]));task.steps.push({action:'source_reanalysis_approved',at:new Date().toISOString()});}
     const extra=options.additionalSteps??4;if(!Number.isInteger(extra)||extra<1||extra>6)throw new EngineError(400,'additionalSteps must be between 1 and 6');
     task.maxSteps=task.agent?Math.min(task.agent.limits.maxTotalSteps,task.agent.usage.steps+extra):Math.min(20,Math.max(task.maxSteps||6,task.steps.filter(s=>s.action!=='apply_approved').length)+extra);task.state='planning';task.ownerPid=process.pid;checkpoint(task,'explicit resume approved');
     void this.run(task).catch(e=>recordSystemEvent('core_resume_failure',{taskId:id,category:e.name}));return task;
   }
-  assertChangeSetAction(record:any,action:string){if(!record.taskId)return;const task=this.get(record.taskId,record.owner);if(this.active?.id===task.id)throw new EngineError(409,'Pause the running task before changing its package');if(action==='apply'&&task.agent?.pendingChangeSet!==record.id)throw new EngineError(409,'Package is not the task current review');if(action==='apply'&&task.agent)for(const source of agentSources(task))if(task.sourceHashes?.[source.file]!==source.sha256)throw new EngineError(409,'Task source changed before approval');if(action==='apply'&&task.state!=='review')throw new EngineError(409,'Task is not awaiting package approval');}
+  assertChangeSetAction(record:any,action:string){if(this.committing)throw new EngineError(409,'A task commit is running; package changes are temporarily blocked');if(!record.taskId)return;const task=this.get(record.taskId,record.owner);if(this.active?.id===task.id)throw new EngineError(409,'Pause the running task before changing its package');if(action==='apply'&&task.agent?.requireCandidateChecks)requireCandidateCheck(record.id,record.digest,record.owner);if(action==='apply'&&task.agent?.pendingChangeSet!==record.id)throw new EngineError(409,'Package is not the task current review');if(action==='apply'&&task.agent)for(const source of agentSources(task))if(task.sourceHashes?.[source.file]!==source.sha256)throw new EngineError(409,'Task source changed before approval');if(action==='apply'&&task.state!=='review')throw new EngineError(409,'Task is not awaiting package approval');}
+  async inspect(id:string,name:string,owner:string,admin=false){const task=this.get(id,owner,admin);const result=await inspectAgentAction(task,name,owner,admin);if(name==='prepare_commit'){task.agent!.commitPlan=result;checkpoint(task,'exact task commit plan prepared; no Git write');}return result;}
+  async commit(id:string,body:any,owner:string,admin=false){if(!admin)throw new EngineError(403,'Administrator approval required');if(this.isBusy())throw new EngineError(409,'Another development operation is running');const task=this.get(id,owner,admin),approved=task.agent?.commitPlan;if(body?.approve!==true||!approved||body.digest!==approved.digest)throw new EngineError(403,'Approve the exact task commit plan');this.committing=true;try{const current=await inspectAgentAction(task,'prepare_commit',owner,admin);if(current.digest!==approved.digest)throw new EngineError(409,'Commit plan changed; prepare and approve again');const result=await developmentGit(task.workspaceId!,'commit',{approve:true,statusHash:approved.statusHash,files:approved.files},owner,admin);task.agent!.commits||=[];task.agent!.commits.push({...result,at:new Date().toISOString()});delete task.agent!.commitPlan;task.result=(task.result||'')+' Lokaler freigegebener Commit: '+result.head;checkpoint(task,'administrator-approved task commit completed');return result;}finally{this.committing=false;}}
   reconcileChangeSet(record:any){if(!record.taskId)return;const task=this.get(record.taskId,record.owner);reconcileAgentChangeSet(task,record,checkpoint);}
   cancel(id:string,owner:string,adminOverride=false){const task=this.get(id,owner,adminOverride);if(this.active?.id===id){this.active.controller.abort(new DOMException('Cancelled by operator','AbortError'));return{...task,state:'cancelling'};}if(['completed','cancelled'].includes(task.state))throw new EngineError(409,'Task is already finished');task.state='cancelled';checkpoint(task,'cancelled by owner');return task;}
   pause(id:string,owner:string,adminOverride=false){const task=this.get(id,owner,adminOverride);if(this.active?.id!==id||!['planning','running'].includes(task.state))throw new EngineError(409,'Only a running task can be paused');this.active.controller.abort(new DOMException('Paused by owner; resume explicitly from checkpoint','TaskPaused'));return {...task,state:'pausing'};}
