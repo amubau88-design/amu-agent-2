@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+// One source list for central and runner code binding, including the acceptance policy.
+export const adapterModules=['protocol','docker-runtime','service','lease','acceptance'] as const;
 export const hash = (value:string|Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 export const uuid = (value:unknown):value is string => typeof value==='string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 export type RunnerProfile={id:string;kind:'build'|'unit'|'integration'|'typecheck';executable:'node'|'npm';arguments:string[];limits:{wallTimeMs:number;memoryMiB:number;cpuCount:number;processCount:number;outputBytes:number}};

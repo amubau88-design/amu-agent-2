@@ -31,9 +31,9 @@ export function backupStatus(){const invalidMetadata:string[]=[];const archives=
 function launch(kind:Job['kind'],run:(id:string)=>Promise<unknown>){if(busy)throw new EngineError(409,'A backup operation is already running');busy=true;const job:Job={id:crypto.randomUUID(),kind,state:'running',createdAt:new Date().toISOString()};jobs.push(job);try{persist();}catch(error){busy=false;jobs.pop();throw error;}
  setImmediate(()=>{void run(job.id).then(result=>{job.state='completed';job.result=result;},error=>{job.state='failed';job.error=error instanceof EngineError?error.message:'Operation failed; existing data was preserved';}).finally(()=>{busy=false;job.finishedAt=new Date().toISOString();try{persist();}catch{console.error('Backup operation journal persistence failed');}});});return {...job};}
 function includes(full:boolean,models:boolean){
- const result=full?['src','docs','scripts','package.json','package-lock.json','tsconfig.json','README.md','.gitignore','.gitattributes']:[];
+ const result=full?['src','docs','scripts','config','package.json','package-lock.json','tsconfig.json','README.md','.gitignore','.gitattributes']:[];
  if(full){for(const item of fs.readdirSync(path.join(root,'scratch'),{withFileTypes:true})){if(item.isDirectory()&&/^(backups|restores|migrations|remote-worker-supervisor|backup_.*|.*-test-.*|central-test-.*|embedded-verification-.*|supervisor-verification-.*)$/.test(item.name))continue;if(item.name==='models'&&!models){result.push('scratch/models/registry.json');continue;}if(item.isFile()&&(/^(central-server\.|central-supervisor\.|supervisor[.-]|windows-)/.test(item.name)||/\.(mjs|ts|log|tmp)$/.test(item.name)))continue;result.push('scratch/'+item.name);}}
- else result.push('scratch/secrets','scratch/models/registry.json','scratch/tls-public');
+ else result.push('config','scratch/secrets','scratch/models/registry.json','scratch/tls-public');
  return result;
 }
 export function startBackup(body:any={}){if(body.scope!==undefined&&!['configuration','full'].includes(body.scope))throw new EngineError(400,'Invalid backup scope');if(body.includeModels!==undefined&&typeof body.includeModels!=='boolean')throw new EngineError(400,'Invalid model backup option');const passphrase=password(body.passphrase),full=body.scope!=='configuration',models=body.includeModels!==false&&full;

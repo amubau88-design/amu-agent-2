@@ -1,8 +1,9 @@
 import fs from 'node:fs';import path from 'node:path';import net from 'node:net';import https from 'node:https';import crypto from 'node:crypto';import type {TLSSocket} from 'node:tls';
-import {DockerRuntime,safeDirectory,type RuntimeConfig} from './docker-runtime.ts';import {hash,uuid,validateManifest,validateProfile,profileDigest} from './protocol.ts';
+import {DockerRuntime,safeDirectory,type RuntimeConfig} from './docker-runtime.ts';import {validateAcceptance} from './acceptance.ts';
+import {adapterModules,hash,uuid,validateManifest,validateProfile,profileDigest} from './protocol.ts';
 import {writePrivateJson} from '../central/storage.ts';
 export type ServiceConfig={serverId:string;host:string;port:number;caFile:string;certificateFile:string;keyFile:string;clientCertificateSha256:string;runtime:RuntimeConfig;profiles:ReturnType<typeof validateProfile>[];reviewedAcceptanceSha256?:string};
-export const adapterDigest=()=>{const extension=path.extname(new URL(import.meta.url).pathname);return hash(Buffer.concat(['protocol','docker-runtime','service','lease'].map(name=>fs.readFileSync(new URL('./'+name+extension,import.meta.url)))));};
+export const adapterDigest=()=>{const extension=path.extname(new URL(import.meta.url).pathname);return hash(Buffer.concat(adapterModules.map(name=>fs.readFileSync(new URL('./'+name+extension,import.meta.url)))));};
 export function loadConfig(file:string):ServiceConfig{
  if(!path.isAbsolute(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>65536)throw Error('Explicit bounded runner configuration file required');safeDirectory(path.dirname(file));
  if(process.platform==='linux'&&(fs.statSync(file).uid!==process.getuid?.()||(fs.statSync(file).mode&0o077)!==0))throw Error('Runner configuration must be owned by the dedicated user with mode 0600');
@@ -14,7 +15,7 @@ export function loadConfig(file:string):ServiceConfig{
 }
 export function acceptanceStatus(config:ServiceConfig){
  const file=path.join(config.runtime.workRoot,'acceptance.json');if(!config.reviewedAcceptanceSha256||!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>65536)return {reviewed:false,reason:'No independently reviewed local acceptance report'};
- try{const bytes=fs.readFileSync(file),r=JSON.parse(bytes.toString());const age=Date.now()-Date.parse(r.at);const required=['actual-container-observations','actual-process-tree-timeout-and-container-removal','actual-cancel-and-container-removal','actual-output-limit-and-container-removal','actual-memory-limit-and-container-removal','actual-process-limit-and-container-removal','actual-project-build-unit-integration','actual-test-failure-and-corrected-recheck'];const complete=Array.isArray(r.checks)&&required.every(name=>r.checks.filter((c:any)=>c.name===name&&c.passed===true).length===1);const reviewed=hash(bytes)===config.reviewedAcceptanceSha256&&r.selfCheckPassed===true&&complete&&r.adapterDigest===adapterDigest()&&r.imageId===config.runtime.imageId&&r.dockerSha256===config.runtime.dockerSha256&&r.uid===process.getuid?.()&&r.socket===config.runtime.socket&&typeof r.runtimeVersion==='string'&&Number.isFinite(age)&&age>=0&&age<86400000;
+ try{const bytes=fs.readFileSync(file),r=JSON.parse(bytes.toString());validateAcceptance(r,adapterDigest());const reviewed=hash(bytes)===config.reviewedAcceptanceSha256&&r.imageId===config.runtime.imageId&&r.dockerSha256===config.runtime.dockerSha256&&r.uid===process.getuid?.()&&r.socket===config.runtime.socket;
  return {reviewed,runtimeVersion:r.runtimeVersion,reason:reviewed?'Local acceptance report reviewed; central AMU activation remains separate':'Stale, incomplete or mismatched acceptance report'};}catch{return {reviewed:false,reason:'Unreadable acceptance report; execution remains blocked'};}
 }
 export function createRunnerService(config:ServiceConfig,runtime=new DockerRuntime(config.runtime),recovery?:{verifiedNoOwnedContainers:boolean;ownerDigest:string;checkedAt:string}){
