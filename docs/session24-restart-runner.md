@@ -48,3 +48,12 @@ Offizielle Grundlagen: [Microsoft WSL-Befehle](https://learn.microsoft.com/en-us
 Vorhandener Qwen2.5-1.5B bleibt aktiv. Keine neue Modellinstallation freigegeben. Vorbereiteter 7B-GGUF benötigt 4.683.073.536 Byte (4,36 GiB), somit mindestens 24,36 GiB vor Download bei unveränderter 20-GiB-Runnerreserve; aktuell fehlen etwa 3 GiB freier Speicher dafür, ohne zusätzliche Download-/Installationsreserve. Geschätzter 2048-Kontext-Modellbedarf 5,84 GiB zusätzlich zur Windowsreserve; kein gemessener 7B-Peak, keine Zusage paralleler WSL-/7B-Nutzung. Nach WSL-Einrichtung neu messen. Keine Zukunftsmodelle heruntergeladen, keine HDD-Nutzung oder Löschung vorgeschlagen.
 
 Harte Abhängigkeit bleibt der separat zu genehmigende Neustart. Danach folgen separate WSL-/Linux-/Rootless-Freigaben und reale Isolationstests. Diese Sitzung enthält keine echte Linux-/Docker-/Coding-Abnahme und kann sie vor Boot nicht ersetzen.
+
+## Abschluss: Freigabe und zusätzliche Sicherungsdiagnose
+
+Der Eigentümer hat den regulären Neustart ausdrücklich freigegeben und führt ihn nach dem Speichern selbst aus. Codex hat keinen Neustartbefehl ausgeführt. Vorher WEB/XAMPP geordnet beenden; nach Anmeldung diesen Chat fortsetzen.
+
+Die zusätzliche Vollsicherung 9fd6f938-6503-432a-9cfc-07f179c18a8c (SHA-256 91e47781b3d06bb9378914ef116af85b6b7e0aaad9863fed14d3d3eea53edf30) ließ sich im normalen API-Prüfpfad nicht vollständig prüfen: eine verschachtelte SQLite-Kopie erhielt einen 267 Zeichen langen Dateipfad und meldete unable to open database file. Dasselbe authentifizierte Archiv wurde unverändert in einen kürzeren geschützten Pfad entpackt; alle drei Datenbanken bestehen dort quick_check. Beleg: scratch/session24-verify-after-shortpath.json. Die API-Verifikation wird weiterhin als fehlgeschlagen ausgewiesen, nicht nachträglich umetikettiert. Produktive Datenbanken unverändert. Keine neuen verschachtelten Prüfkopien als Standard-Sicherungsmuster verwenden; keine bestehenden Kopien gelöscht oder verschoben.
+
+Die AMU-Prüfsoftware unterscheidet jetzt Datenbank-Öffnungsfehler, nicht ausführbare Prüfung und tatsächlichen Integritätsfehler, ohne Fehlermeldungsinhalte oder Daten auszugeben. Gezielter Worker-Test mit fehlendem Datenbankpfad und gültiger Fixture bestanden; TypeScript erneut bestanden. Diese Diagnosekorrektur ist bis zum Neustart nur Quellstand. Der normale lange API-Restorepfad wurde nicht als generell behoben dargestellt; vor produktivem Restore Pfadlängen und Ziel separat prüfen.
+

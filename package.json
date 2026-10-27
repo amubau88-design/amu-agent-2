@@ -52,7 +52,7 @@
     "test:session21": "node src/tests/session21-lifecycle.test.mjs",
     "test:session22": "node src/tests/session22-backup.test.mjs && node src/tests/session22-acceptance.test.mjs",
     "test:session23": "node src/tests/session23-models.test.mjs",
-    "test:session24": "node src/tests/session24-restart.test.mjs"
+    "test:session24": "node src/tests/session24-restart.test.mjs && node src/tests/session24-backup-errors.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",
