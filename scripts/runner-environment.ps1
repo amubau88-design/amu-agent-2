@@ -21,7 +21,7 @@ try {
 $operatingSystem=$null;$storage=$null
 try {
   $os=Get-CimInstance Win32_OperatingSystem
-  $operatingSystem=@{caption=$os.Caption;version=$os.Version;build=[int]$os.BuildNumber;architecture=$os.OSArchitecture;freeMemoryBytes=([long]$os.FreePhysicalMemory*1024);modernWslInstallBuildSupported=([int]$os.BuildNumber -ge 19041)}
+  $operatingSystem=@{caption=$os.Caption;version=$os.Version;build=[int]$os.BuildNumber;architecture=$os.OSArchitecture;lastBootTime=$os.LastBootUpTime.ToUniversalTime().ToString('o');freeMemoryBytes=([long]$os.FreePhysicalMemory*1024);modernWslInstallBuildSupported=([int]$os.BuildNumber -ge 19041)}
 } catch {$limitations+='Operating-system query unavailable: '+$_.Exception.GetType().Name}
 try {
   $drive=[IO.Path]::GetPathRoot($projectRoot).TrimEnd('\')

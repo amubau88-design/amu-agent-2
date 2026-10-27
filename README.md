@@ -44,4 +44,6 @@ Historischer Quellstand: **1.20.0 – Konfiguration in Sicherung/Restore erhalte
 
 Historischer Quellstand: **1.21.0 – gepinntes Qwen2.5-Coder-7B-Profil, Beschaffungs-/RAM-Grenzen, gesperrte Upgrade-Vormerkungen und unabhängiger C:-Runner-Zielort**. Kein 7B-Download bei unterschrittener Runnerreserve. [Sitzung 23: tatsächlicher Status, Messwerte und Systemfreigaben](docs/session23-coding-runner-models.md). `npm run test:session23`.
 
-Aktueller Quellstand: **1.22.0 – geprüfte Neustart-Evidenz, Sicherungen und konkreter Wiederanlaufplan**. Kein Neustart und kein Linux-Runner ausgeführt. [Sitzung 24: tatsächlicher Stand und separate Freigaben](docs/session24-restart-runner.md). Gezielte Prüfung: npm run test:session24.
+Historischer Quellstand: **1.22.0 – geprüfte Neustart-Evidenz, Sicherungen und konkreter Wiederanlaufplan**. Kein Neustart und kein Linux-Runner ausgeführt. [Sitzung 24: tatsächlicher Stand und separate Freigaben](docs/session24-restart-runner.md). Gezielte Prüfung: npm run test:session24.
+
+Aktueller Quellstand: **1.23.0 – Hypervisor nach Neustart korrekt erkennen und WSL-Bereitstellung nachvollziehbar prüfen**. Laufende API 1.22.0; tatsächliche Linux-/Containerabnahme separat. [Sitzung 25: Dienste, WSL und Freigaben](docs/session25-wsl-runner.md). npm run test:session25.

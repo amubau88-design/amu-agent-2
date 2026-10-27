@@ -10,7 +10,9 @@ export function runnerSetupPlan(inventory,storageReport,storagePolicy){
  const blockers=[],warnings=[];const build=inventory.operatingSystem?.build;
  const age=Date.now()-Date.parse(inventory.at||'');if(!Number.isFinite(age)||age<0||age>=86400000)blockers.push('Inventory is missing a current timestamp; repeat the read-only probe');
  if(!Number.isSafeInteger(build)||build<19041)blockers.push('Windows build 19041+ not established; modern WSL installation cannot be assumed');
- if(!Array.isArray(cpu)||!cpu.length||!cpu.every(p=>p.VirtualizationFirmwareEnabled===true&&p.VMMonitorModeExtensions===true&&p.SecondLevelAddressTranslationExtensions===true))blockers.push('Firmware virtualization and SLAT not established');
+ const firmwareReported=Array.isArray(cpu)&&cpu.length>0&&cpu.every(p=>p.VirtualizationFirmwareEnabled===true&&p.VMMonitorModeExtensions===true&&p.SecondLevelAddressTranslationExtensions===true);
+ if(!firmwareReported&&inventory.hardware?.hypervisorPresent!==true)blockers.push('Firmware virtualization and SLAT not established');
+ if(!firmwareReported&&inventory.hardware?.hypervisorPresent===true)warnings.push('Running Windows hypervisor established; raw CPU virtualization flags may be masked. Linux boot and isolation still require real verification');
  if(!positive(total)||!positive(free)||threads<4||total<12*GiB||free<6*GiB)blockers.push('Insufficient or unknown CPU/RAM reserve for concurrent inference and runner');
  // Keep at least 3 GiB of currently free RAM for Windows/inference; cap the starter VM at 4 GiB.
  const memoryGiB=positive(free)?Math.max(0,Math.min(4,Math.floor(free/GiB)-3)):0;
