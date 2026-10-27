@@ -13,7 +13,7 @@ type Connection={endpoint:string;serverId:string;certificateSha256:string;caFile
 const directory=path.join(coreDirectory,'external-runner');fs.mkdirSync(directory,{recursive:true});
 const configFile=path.join(directory,'connection.json'),probeFile=path.join(directory,'probe.json');
 const reviewFile=path.join(directory,'acceptance-review.json');
-export const deployedAdapterDigest=()=>contentHash(Buffer.concat(['protocol','docker-runtime','service'].map(name=>fs.readFileSync(path.resolve('src/runner/'+name+'.ts')))).toString('utf8'));
+export const deployedAdapterDigest=()=>contentHash(Buffer.concat(['protocol','docker-runtime','service','lease'].map(name=>fs.readFileSync(path.resolve('src/runner/'+name+'.ts')))).toString('utf8'));
 const networks=new net.BlockList();for(const [ip,bits] of [['127.0.0.0',8],['10.0.0.0',8],['172.16.0.0',12],['192.168.0.0',16]] as const)networks.addSubnet(ip,bits);networks.addAddress('::1','ipv6');networks.addSubnet('fc00::',7,'ipv6');
 function credentials(relative:unknown){
  const root=path.resolve(process.env.AMU_CENTRAL_STATE_DIR||'scratch/secrets');
