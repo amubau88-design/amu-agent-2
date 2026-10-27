@@ -1,6 +1,6 @@
 # Sitzung 25 – Hypervisor aktiv, Dienste wiederhergestellt, modernes WSL bereit
 
-Datum: 27.10.2026 (Europe/Berlin). Ausgangsstand 1.22.0 / 4e339ba, Git zunächst sauber. Neuer Quellstand 1.23.0; endgültiger Commit, Ressourcen und Installationsstatus werden in scratch/session25-closeout.json festgehalten. Laufender Quellprozess wurde nicht manuell neu gestartet.
+Sitzung: 27./28.10.2026 (Europe/Berlin). Ausgangsstand 1.22.0 / 4e339ba, Git zunächst sauber. Neuer Quellstand 1.23.0; endgültiger Commit, Ressourcen und Installationsstatus werden in scratch/session25-closeout.json festgehalten. Laufender Quellprozess wurde nicht manuell neu gestartet.
 
 ## Tatsächlicher Zustand nach Windows-Neustart
 
@@ -50,3 +50,25 @@ Der tatsächlich zum Abschluss erreichte Freigabe-/Ausführungsstatus steht in s
 Nach bestätigtem Linuxstart separat Node 24, Rootless-Docker-Pakete und verifiziertes minimales Image genehmigen. systemd/cgroup v2 und tatsächlich delegierte CPU-/RAM-/PID-Limits prüfen; rootful Dienst nicht stillschweigend als Ersatz einschalten. Bestehende AMU-Hostgrenzen, mTLS-/Zertifikatsverwaltung, Registrierung, Transfer und Freigabeworkflows weiterverwenden. Bestehende isolierte Abnahme deckt Limits, fehlendes Netzwerk, Dateischutz, Abbruch/Bereinigung und Mehrdateien-Build-/Unit-/Integration mit Fehler/Korrektur ab; erst nach echter Linuxausführung und unabhängiger Prüfung freigeben. Keine Windows-Hostausführung unbekannter Projekte.
 
 7B unverändert nur vorbereitet: derzeit wäre sein RAM-Schätzwert abdeckbar, aber die zusätzliche 4,36-GiB-Datei unterschritte die noch vorgesehene Runner-Startreserve. Linux hat Vorrang, nach Bereitstellung neu bewerten und Modellinstallation eigens genehmigen lassen. Größere Modelle nicht heruntergeladen.
+
+## Tatsächlich ausgeführter Linux-Schritt nach separater Freigabe
+
+Der Eigentümer genehmigte Ubuntu und die begrenzte Linux-Einrichtung. Offizielles Image heruntergeladen: 388.975.696 Byte; SHA-256 stimmt mit dem oben genannten Herstellerwert überein. AMU-Runner wurde als WSL2-Distribution unter dem genehmigten C:-Pfad registriert, dynamisches VHDX mit 16-GiB-Grenze. Neue .wslconfig mit 4 GiB / 2 CPUs / 1 GiB Swap und ausgeschalteter GUI angelegt. Keine vorhandene Konfiguration überschrieben. Ubuntu meldet tatsächlich 24.04.5 LTS; kein zusätzliches ISO oder Desktop installiert.
+
+Erster Provisionierungslauf: Windows-Pipeline fügte dem Abschluss der Shell-Here-Document eine CR-Zeile hinzu. Die neue wsl.conf enthielt deshalb eine zusätzliche CONF-Zeile. Tatsächlich gelesen, Original als Root-Kopie erhalten und ausschließlich diese neu erzeugte Konfiguration mit LF-genauer Byteübertragung korrigiert. Keine Neuinstallation, kein neues Benutzerkonto nach der ersten Anlage und keine Original-Projektdateien angefasst.
+
+Die strenge vorhandene AMU-Prüfung fand danach zwei echte WSL-Hostbrücken trotz deaktivierter Automount-/Interop-Konfiguration: eine schreibgeschützte 9p-Treiberfreigabe unter /usr/lib/wsl/drivers und die registrierte PE-/init-Interop. Die Sicherheitsprüfung wurde nicht gelockert. Der neue Linux-Systemdienst amu-wsl-boundary.service entfernt ausschließlich diese bekannten Brücken vor multi-user.target und nach systemd-binfmt.service. Das Skript verweigert unbekannte Mountarten, Quellen oder Interpretersignaturen; kein erzwungenes/lazy Unmount, keine pauschale Unmountaktion. Dieser Dienst gehört nur zur neuen CPU-Runner-Distribution; Windows-Dienste/Windows-Treiber wurden nicht verändert. GPU-/Windows-Interop ist in dieser Distribution absichtlich nicht verfügbar.
+
+Nach gezielten Neustarts ausschließlich dieser neuen Distribution tatsächlich bestanden:
+
+- Benutzer UID/GID 1000 amu-runner, nur eigene Gruppe, keine sudo/wheel/docker-Gruppe.
+- PID 1 systemd, cgroup2fs.
+- Schutzdienst enabled und active; keine 9p-/drvfs-Mounts und keine WSLInterop-Registrierung mehr nach Distribution-Neustart.
+- Existierender AMU assertHostBoundaryObservation-Validator gegen frisch aus Linux gelesene Werte erfolgreich, keine synthetischen Linuxdaten verwendet.
+- Zwei tatsächliche virtuelle CPUs; /proc/meminfo MemTotal 4.013.076 KiB, SwapTotal 1.048.576 KiB. Linux-Kernel-/VM-Overhead erklärt den nutzbaren RAM unterhalb nomineller 4 GiB.
+- Linux-nativer privater Zustandsordner /home/amu-runner/private/state, Eigentümer 1000, Modus 700.
+- Shell-Syntax und systemd-Unit mit Linux-eigenen Verwaltungswerkzeugen geprüft. Keine Projekt-Unit-/Buildtests auf dem Linux-Host ausgeführt.
+
+Belege: scratch/session25-linux-result-corrected.json, session25-linux-host-validation.json, session25-linux-boundary.log. Ursprünglicher fehlgeschlagener Bericht bleibt unverändert erhalten. Docker, Node 24 in Linux, Containerimage, mTLS-Runnerdienst und echte Container-/Coding-Abnahme fehlen weiterhin und wurden nicht stillschweigend nachinstalliert. Linux-Härtung ist keine Containerabnahme. Bestehende zentrale Projektausführung bleibt gesperrt.
+
+Die neue Schutzdienstvorlage und ihr eng begrenztes Skript werden mit dem bestehenden festen Runner-Handoff ausgeliefert. Die Sitzung-17-/19-Schutzregressionen bestanden nach Erweiterung erneut. Aktueller Handoff-Digest und dateigenaue Konfigurationssicherung stehen im Abschlussnachweis. Windows wurde in dieser Sitzung nicht erneut gestartet.

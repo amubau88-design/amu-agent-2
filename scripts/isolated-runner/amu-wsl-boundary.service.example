@@ -1,0 +1,12 @@
+[Unit]
+Description=Remove Windows host bridges from dedicated AMU CPU runner
+After=local-fs.target systemd-binfmt.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/amu-runner-disable-wsl-drivers
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
