@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "protectedDiskIdentities": [
+    "e9b4a6627084fdeb30a1a28c74aafe10ced0deaa6c111388c52ffeb75d844f62"
+  ],
+  "preferredPartitionBytes": null,
+  "reason": "Explicit owner decision in session 20: HDD may contain former AMU SYSTEM data. Leave unchanged until owner verifies and secures AMU SYSTEM on another computer and later grants separate consent. No partitioning, formatting or overwriting authorization."
+}

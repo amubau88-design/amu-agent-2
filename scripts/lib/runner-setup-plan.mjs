@@ -2,7 +2,7 @@ import {runnerStoragePlan} from './runner-storage-plan.mjs';
 const GiB=1024**3;
 const positive=n=>typeof n==='number'&&Number.isFinite(n)&&n>0;
 /** Resource recommendations are admission thresholds, never an isolation certificate. */
-export function runnerSetupPlan(inventory,storageReport){
+export function runnerSetupPlan(inventory,storageReport,storagePolicy){
  if(inventory?.schemaVersion!==2||inventory.readOnly!==true)throw Error('A schema 2 read-only inventory is required');
  const cpu=inventory.hardware?.processors;
  const total=inventory.hardware?.totalMemoryBytes,free=inventory.operatingSystem?.freeMemoryBytes;
@@ -16,12 +16,14 @@ export function runnerSetupPlan(inventory,storageReport){
  const memoryGiB=positive(free)?Math.max(0,Math.min(4,Math.floor(free/GiB)-3)):0;
  const processors=Math.min(2,Math.max(0,threads-2));
  const volumes=Array.isArray(inventory.storage?.fixedVolumes)?inventory.storage.fixedVolumes:[];
- const storageReview=storageReport?runnerStoragePlan(storageReport):null;
+ const storageReview=storageReport?runnerStoragePlan(storageReport,storagePolicy):null;
  const knownInternal=volume=>{const mappings=(inventory.storage?.volumeMappings||[]).filter(m=>m.volume===volume.DeviceID);if(mappings.length!==1)return false;const physical=(inventory.storage?.physicalDisks||[]).filter(d=>String(d.FriendlyName).trim().toUpperCase()===String(mappings[0].model).trim().toUpperCase());return physical.length===1&&['SATA','NVMe','SAS','ATA'].includes(physical[0].BusType)&&['SSD','HDD'].includes(physical[0].MediaType);};
- const eligibleVolumes=storageReview?storageReview.plan.eligibleVolumes.map(v=>({volume:v.volume,freeGiB:Math.floor(v.freeBytes/GiB),selectionApproved:false})):volumes.filter(v=>/^[A-Z]:$/i.test(v.DeviceID||'')&&positive(v.FreeSpace)&&v.FreeSpace>=20*GiB&&knownInternal(v)).map(v=>({volume:v.DeviceID,freeGiB:Math.floor(v.FreeSpace/GiB),selectionApproved:false}));
+ const eligibleVolumes=storageReview?storageReview.plan.eligibleVolumes.map(v=>({volume:v.volume,freeGiB:Math.floor(v.freeBytes/GiB),selectionApproved:false})):storagePolicy?.protectedDiskIdentities?.length?[]:volumes.filter(v=>/^[A-Z]:$/i.test(v.DeviceID||'')&&positive(v.FreeSpace)&&v.FreeSpace>=20*GiB&&knownInternal(v)).map(v=>({volume:v.DeviceID,freeGiB:Math.floor(v.FreeSpace/GiB),selectionApproved:false}));
+ if(!storageReview&&storagePolicy?.protectedDiskIdentities?.length)blockers.push('Detailed storage inventory required to respect owner-protected disk identities');
  if(!eligibleVolumes.length)blockers.push('No inventoried volume with at least 20 GiB free; no installation target approved');
  if(storageReview?.plan.recommendation?.kind==='new_partition_requires_owner_approval')blockers.push('Internal HDD has unallocated capacity, not filesystem free space; partition/format and prior-data review require explicit owner approval');
  if(storageReview?.plan.limitations.length)blockers.push('Detailed storage inventory incomplete; no target can be selected safely');
+ if(storageReview?.plan.ownerProtectedDisks.length)blockers.push('Owner explicitly protected disk(s); leave unchanged, no partition proposal for these identities');
  if(!positive(inventory.storage?.freeBytes)||inventory.storage.freeBytes<20*GiB)warnings.push('Project volume below the 20 GiB starter reserve; do not install a WSL rootfs or images there');
  if(!inventory.features?.some(f=>f.name==='VirtualMachinePlatform'&&f.enabled===true))blockers.push('VirtualMachinePlatform disabled or unknown; explicit system-change approval and reboot required');
  const version=inventory.wsl?.queries?.find(q=>Array.isArray(q.arguments)&&q.arguments.length===1&&q.arguments[0]==='--version');

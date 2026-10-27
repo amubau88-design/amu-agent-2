@@ -17,7 +17,9 @@ export async function exportBackup(file,destination){
  await pipeline(fs.createReadStream(file),new Transform({transform(chunk,_encoding,callback){hash.update(chunk);callback(null,chunk);}}),fs.createWriteStream(temporary,{flags:'wx',mode:0o600}));
  if(hash.digest('hex')!==metadata.verifiedSha256)throw Error('Encrypted backup changed or is corrupt; partial export was not published');
  const handle=await fs.promises.open(temporary,'r+');try{await handle.sync();}finally{await handle.close();}
+ const readBack=crypto.createHash('sha256');for await(const chunk of fs.createReadStream(temporary))readBack.update(chunk);
+ if(readBack.digest('hex')!==metadata.verifiedSha256)throw Error('Destination read-back verification failed; export remains partial');
  await fs.promises.writeFile(final+'.json',JSON.stringify(metadata,null,2),{flag:'wx',mode:0o600});
  await fs.promises.rename(temporary,final);
- return {exported:true,directory:output,bytes:source.size,sha256:metadata.verifiedSha256,encrypted:true,recoveryKeyIncluded:false};
+ return {exported:true,directory:output,bytes:source.size,sha256:metadata.verifiedSha256,encrypted:true,destinationReadBackVerified:true,recoveryKeyIncluded:false};
 }
