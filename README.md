@@ -42,4 +42,6 @@ Historischer Quellstand: **1.19.0 – exklusiver Runner-Start und Abnahme, Stop-
 
 Historischer Quellstand: **1.20.0 – Konfiguration in Sicherung/Restore erhalten und gemeinsame Runner-Abnahmeprüfung**. [Sitzung 22: A/B/C-Bestandsaufnahme, ausgewählter WSL2-Weg, Modellgrenzen und priorisierte Fertigstellung](docs/session22-assessment.md). Ausschließlich dieser Windows-PC; HDD bleibt geschützt. `npm run test:session22`. Die Live-Version ist separat im Abschlussnachweis dokumentiert.
 
-Aktueller Quellstand: **1.21.0 – gepinntes Qwen2.5-Coder-7B-Profil, Beschaffungs-/RAM-Grenzen, gesperrte Upgrade-Vormerkungen und unabhängiger C:-Runner-Zielort**. Kein 7B-Download bei unterschrittener Runnerreserve. [Sitzung 23: tatsächlicher Status, Messwerte und Systemfreigaben](docs/session23-coding-runner-models.md). `npm run test:session23`.
+Historischer Quellstand: **1.21.0 – gepinntes Qwen2.5-Coder-7B-Profil, Beschaffungs-/RAM-Grenzen, gesperrte Upgrade-Vormerkungen und unabhängiger C:-Runner-Zielort**. Kein 7B-Download bei unterschrittener Runnerreserve. [Sitzung 23: tatsächlicher Status, Messwerte und Systemfreigaben](docs/session23-coding-runner-models.md). `npm run test:session23`.
+
+Aktueller Quellstand: **1.22.0 – geprüfte Neustart-Evidenz, Sicherungen und konkreter Wiederanlaufplan**. Kein Neustart und kein Linux-Runner ausgeführt. [Sitzung 24: tatsächlicher Stand und separate Freigaben](docs/session24-restart-runner.md). Gezielte Prüfung: npm run test:session24.

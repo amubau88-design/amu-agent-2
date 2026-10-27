@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -51,7 +51,8 @@
     "hardware:inventory": "pwsh -NoProfile -File scripts/hardware-inventory.ps1",
     "test:session21": "node src/tests/session21-lifecycle.test.mjs",
     "test:session22": "node src/tests/session22-backup.test.mjs && node src/tests/session22-acceptance.test.mjs",
-    "test:session23": "node src/tests/session23-models.test.mjs"
+    "test:session23": "node src/tests/session23-models.test.mjs",
+    "test:session24": "node src/tests/session24-restart.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",
