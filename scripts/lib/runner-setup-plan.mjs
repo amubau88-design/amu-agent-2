@@ -23,7 +23,7 @@ export function runnerSetupPlan(inventory,storageReport,storagePolicy){
  if(!eligibleVolumes.length)blockers.push('No inventoried volume with at least 20 GiB free; no installation target approved');
  if(storageReview?.plan.recommendation?.kind==='new_partition_requires_owner_approval')blockers.push('Internal HDD has unallocated capacity, not filesystem free space; partition/format and prior-data review require explicit owner approval');
  if(storageReview?.plan.limitations.length)blockers.push('Detailed storage inventory incomplete; no target can be selected safely');
- if(storageReview?.plan.ownerProtectedDisks.length)blockers.push('Owner explicitly protected disk(s); leave unchanged, no partition proposal for these identities');
+ if(storageReview?.plan.ownerProtectedDisks.length){const notice='Owner explicitly protected disk(s); leave unchanged, no partition proposal for these identities';if(eligibleVolumes.length)warnings.push(notice);else blockers.push(notice);}
  if(!positive(inventory.storage?.freeBytes)||inventory.storage.freeBytes<20*GiB)warnings.push('Project volume below the 20 GiB starter reserve; do not install a WSL rootfs or images there');
  if(!inventory.features?.some(f=>f.name==='VirtualMachinePlatform'&&f.enabled===true))blockers.push('VirtualMachinePlatform disabled or unknown; explicit system-change approval and reboot required');
  const version=inventory.wsl?.queries?.find(q=>Array.isArray(q.arguments)&&q.arguments.length===1&&q.arguments[0]==='--version');

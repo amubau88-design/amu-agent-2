@@ -1,7 +1,9 @@
 import os from 'node:os';
+import fs from 'node:fs';
+import {codingAcquisitionPlan} from './acquisition.ts';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {codingProfiles,registerLocalModel} from './profiles.ts';
-import {listLocalModels,EngineError} from './models.ts';
+import {modelDirectory,listLocalModels,EngineError} from './models.ts';
 import {assessModel,memoryBudget} from './resources.ts';
 import {hardwareInventory} from './hardware.ts';
 import {platform} from '../central/platform.ts';
@@ -11,7 +13,9 @@ export async function codingRuntimeStatus(){
   const models=installed.filter(m=>(m.profileId||'local-gguf')===profile.id);
   const assessment=await Promise.all(models.map(async model=>{try{return {modelId:model.id,filename:model.filename,path:'scratch/models/'+model.filename,sha256:model.sha256,license:model.license,...await assessModel(model.id,0,Math.min(profile.defaultContext,platform.contextSize))};}catch(error){return {modelId:model.id,error:(error as Error).message,loadable:false};}}));
   const expectedRam=Math.ceil(profile.minimumWeightBytes*1.2+512*1024**2),budget=memoryBudget();
-  return {...profile,largeModelAcceptance:profile.repository?'not-tested-with-large-weights':'existing-small-model',installed:assessment,available:models.length>0,loadable:models.length>0&&assessment.some(m=>m.loadable),preflight:{configuredContext:Math.min(profile.defaultContext,platform.contextSize),minimumEstimatedRamBytes:expectedRam,availableRamBudgetBytes:budget,sufficientForMinimum:expectedRam<=budget,reason:models.length===0?'Keine passenden lokalen Gewichte installiert. Kein automatischer Download.':assessment.some(m=>m.loadable)?'Innerhalb des vorsichtigen RAM-Budgets; der Modellstart bleibt eine getrennte Aktion.':'Nicht genug freier Arbeitsspeicher nach Systemreserve oder ungültige Metadaten.'}};
+  let acquisition=null;if(profile.repository){try{const disk=fs.statfsSync(modelDirectory);acquisition=codingAcquisitionPlan(profile,disk.bavail*disk.bsize,budget);}catch{acquisition={resourceFit:false,reasons:['Model filesystem capacity unavailable'],estimatedRamBytes:expectedRam,willDownload:false,willLoad:false};}}
+  const assessedRam=acquisition?.estimatedRamBytes??expectedRam;
+  return {...profile,acquisition,largeModelAcceptance:profile.repository?'not-tested-with-large-weights':'existing-small-model',installed:assessment,available:models.length>0,loadable:models.length>0&&assessment.some(m=>m.loadable),preflight:{configuredContext:Math.min(profile.defaultContext,platform.contextSize),minimumEstimatedRamBytes:assessedRam,availableRamBudgetBytes:budget,sufficientForMinimum:assessedRam<=budget,reason:profile.planningOnly?'Nur vorgemerkt; keine GGUF-/Laufzeitfreigabe.':models.length===0?'Keine passenden lokalen Gewichte installiert. Kein automatischer Download.':assessment.some(m=>m.loadable)?'Innerhalb des vorsichtigen RAM-Budgets; der Modellstart bleibt eine getrennte Aktion.':'Nicht genug freier Arbeitsspeicher nach Systemreserve oder ungültige Metadaten.'}};
  }));
  return {runtime:'AMU Embedded / node-llama-cpp 3.22.2',profiles,hardware,modelDirectory:'scratch/models',automaticDownloads:false,parallelism:{threads:platform.threads,maximumContext:platform.contextSize,workerLimit:platform.maxWorkers},cpuOnly:true,nativeToolCallingAvailable:false,structuredToolProtocol:'AMU coding tools v1',freeMemoryBytes:os.freemem()};
 }
