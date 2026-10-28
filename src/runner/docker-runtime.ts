@@ -4,12 +4,19 @@ import {hash,validateProfile,validateManifest,type RunnerProfile,type ManifestFi
 
 export type RuntimeConfig={dockerExecutable:string;dockerSha256:string;socket:string;imageId:string;workRoot:string};
 export type ProcessResult={code:number|null;stdout:string;stderr:string;reason?:'cancelled'|'timed_out'|'output_limit'};
-export type HostBoundaryObservation={platform:string;uid:number;pidOne:string;groups:string[];wsl:boolean;stateRoot:string;wslConfiguration?:string;mounts?:string;windowsInteropRegistered?:boolean};
+/** Shared by diagnostics and execution admission; successful metadata is not container acceptance. */
+export function assertRootlessDockerInfo(value:unknown){
+ const data=value as any,warnings=data?.Warnings??[];
+ if(!data||data.OSType!=='linux'||data.CgroupVersion!=='2'||data.CgroupDriver!=='systemd'||typeof data.ServerVersion!=='string'||!data.ServerVersion.length||data.ServerVersion.length>100||!Array.isArray(data.SecurityOptions)||!data.SecurityOptions.every((v:unknown)=>typeof v==='string')||!data.SecurityOptions.some((v:string)=>v.includes('rootless'))||!data.SecurityOptions.some((v:string)=>v.includes('seccomp'))||!Array.isArray(warnings)||!warnings.every((v:unknown)=>typeof v==='string')||warnings.some((v:string)=>/cpu|memory|pids|cgroup|swap/i.test(v)))throw Error('Rootless, seccomp and fully delegated cgroup v2/systemd limits are required');
+ return {runtimeVersion:data.ServerVersion as string};
+}
+export type HostBoundaryObservation={platform:string;uid:number;pidOne:string;groups:string[];wsl:boolean;stateRoot:string;wslConfiguration?:string;mounts?:string;windowsInteropRegistered?:boolean;corePattern?:string};
 /** This policy is mandatory in the actual adapter, not merely an optional deployment probe. */
 export function assertHostBoundaryObservation(o:HostBoundaryObservation){
  if(o.platform!=='linux'||!Number.isInteger(o.uid)||o.uid<=0||o.pidOne!=='systemd'||typeof o.wsl!=='boolean'||!Array.isArray(o.groups)||o.groups.some(g=>['sudo','wheel','docker'].includes(g)))throw Error('Dedicated non-root systemd host without administrative groups required');
  if(!path.posix.isAbsolute(o.stateRoot))throw Error('Linux-native runner state required');
  if(!o.wsl)return;
+ if(o.corePattern!=='core')throw Error('WSL host-piped or unknown core dumps forbidden; approved core pattern and zero container core limit required');
  let section='';const values:Record<string,string>={};for(const raw of (o.wslConfiguration||'').split('\n')){const line=raw.split('#')[0].trim().toLowerCase();if(/^\[.+\]$/.test(line)){section=line.slice(1,-1);continue;}const separator=line.indexOf('=');if(separator>0)values[section+'.'+line.slice(0,separator).trim()]=line.slice(separator+1).trim();}
  if(values['boot.systemd']!=='true'||values['automount.enabled']!=='false'||values['automount.mountfstab']!=='false'||values['interop.enabled']!=='false'||values['interop.appendwindowspath']!=='false')throw Error('Dedicated WSL must explicitly disable Windows automount, fstab and interoperability');
  if(typeof o.mounts!=='string'||/\s(?:9p|drvfs)\s/i.test(o.mounts)||o.windowsInteropRegistered!==false||/^\/mnt\/[a-z](\/|$)/i.test(o.stateRoot))throw Error('Windows shares, interoperability or Windows-mounted runner state are forbidden');
@@ -18,7 +25,7 @@ export function assertLinuxHostBoundary(stateRoot:string){
  if(process.platform!=='linux'||!process.getuid||process.getuid()===0)throw Error('Dedicated non-root Linux runner required');
  const ids=new Set([process.getgid!(),...process.getgroups!()]),groups=fs.readFileSync('/etc/group','utf8').split('\n').filter(line=>ids.has(Number(line.split(':')[2]))).map(line=>line.split(':')[0]);
  const wsl=/microsoft/i.test(fs.readFileSync('/proc/version','utf8'));
- assertHostBoundaryObservation({platform:process.platform,uid:process.getuid(),pidOne:fs.readFileSync('/proc/1/comm','utf8').trim(),groups,wsl,stateRoot,...(wsl?{wslConfiguration:fs.readFileSync('/etc/wsl.conf','utf8'),mounts:fs.readFileSync('/proc/mounts','utf8'),windowsInteropRegistered:fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')}:{})});
+  assertHostBoundaryObservation({platform:process.platform,uid:process.getuid(),pidOne:fs.readFileSync('/proc/1/comm','utf8').trim(),groups,wsl,stateRoot,...(wsl?{wslConfiguration:fs.readFileSync('/etc/wsl.conf','utf8'),mounts:fs.readFileSync('/proc/mounts','utf8'),windowsInteropRegistered:fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'),corePattern:fs.readFileSync('/proc/sys/kernel/core_pattern','utf8').trim()}:{})});
 }
 export const runnerDiskReserveBytes=2n*1024n**3n;
 export function assertRunnerFreeSpace(stats:{bsize:number|bigint;bavail:number|bigint}){
@@ -37,7 +44,7 @@ export function cleanupInput(root:string,id:string,files:ManifestFile[]){
 }
 export function dockerArguments(config:RuntimeConfig,name:string,source:string,profile:RunnerProfile,mode:'project'|'acceptance'|'acceptance-memory'='project'){
  validateProfile(profile);if(!/^amu-run-[a-f0-9-]{36}$/.test(name))throw Error('Invalid owned container name');if(!path.isAbsolute(source)||source.includes(',')||source.includes('\0'))throw Error('Invalid source mount');if(!/^sha256:[a-f0-9]{64}$/.test(config.imageId))throw Error('Pin a local immutable image ID');
- return ['--host',config.socket,'run','--pull=never','--name',name,'--label','amu.isolated-runner=1','--label','amu.runner.owner='+hash(config.workRoot),'--network=none','--read-only','--user=1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges','--cgroupns=private','--ipc=private','--memory='+profile.limits.memoryMiB+'m','--memory-swap='+profile.limits.memoryMiB+'m','--cpus='+profile.limits.cpuCount,'--pids-limit='+profile.limits.processCount,'--ulimit','nofile=128:128','--log-driver=none','--no-healthcheck','--stop-timeout=1','--tmpfs','/work:rw,nosuid,nodev,size=268435456,uid=1000,gid=1000,mode=0700','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700','--mount','type=bind,src='+source+',dst=/input,readonly','--workdir=/work','--entrypoint=/usr/local/bin/node',config.imageId,'/opt/amu/entry.mjs',mode,JSON.stringify(profile)];
+ return ['--host',config.socket,'run','--pull=never','--name',name,'--label','amu.isolated-runner=1','--label','amu.runner.owner='+hash(config.workRoot),'--network=none','--read-only','--user=1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges','--cgroupns=private','--ipc=private','--memory='+profile.limits.memoryMiB+'m','--memory-swap='+profile.limits.memoryMiB+'m','--cpus='+profile.limits.cpuCount,'--pids-limit='+profile.limits.processCount,'--ulimit','nofile=128:128','--ulimit','core=0:0','--log-driver=none','--no-healthcheck','--stop-timeout=1','--tmpfs','/work:rw,nosuid,nodev,size=268435456,uid=1000,gid=1000,mode=0700','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=16777216,uid=1000,gid=1000,mode=0700','--mount','type=bind,src='+source+',dst=/input,readonly','--workdir=/work','--entrypoint=/usr/local/bin/node',config.imageId,'/opt/amu/entry.mjs',mode,JSON.stringify(profile)];
 }
 /** Only this adapter can spawn Docker. Never launches a project command on the runner host. */
 export class DockerRuntime {
@@ -59,7 +66,7 @@ export class DockerRuntime {
   if(c.socket!=='unix:///run/user/'+process.getuid()+'/docker.sock'||!fs.statSync(c.socket.slice(7)).isSocket()||fs.statSync(c.socket.slice(7)).uid!==process.getuid())throw Error('Only the dedicated user rootless Docker socket is allowed');
   const configDir=path.join(c.workRoot,'docker-config');if(!fs.existsSync(configDir))fs.mkdirSync(configDir,{mode:0o700});safeDirectory(configDir);if(fs.readdirSync(configDir).length)throw Error('Docker client configuration must remain empty; registry credentials are forbidden');
   const info=await this.command(['--host',c.socket,'info','--format','{{json .}}'],5000);if(info.code!==0||info.reason)throw Error('Rootless Docker is unavailable');const data=JSON.parse(info.stdout);
-  if(data.OSType!=='linux'||data.CgroupVersion!=='2'||data.CgroupDriver!=='systemd'||!data.SecurityOptions?.some((v:string)=>v.includes('rootless'))||!data.SecurityOptions?.some((v:string)=>v.includes('seccomp'))||data.Warnings?.some((v:string)=>/cpu|memory|pids|cgroup|swap/i.test(v)))throw Error('Rootless, seccomp and fully delegated cgroup v2/systemd limits are required');
+  assertRootlessDockerInfo(data);
   if(!/^sha256:[a-f0-9]{64}$/.test(c.imageId))throw Error('Immutable local image ID required');const image=await this.command(['--host',c.socket,'image','inspect',c.imageId],5000);if(image.code!==0||image.reason)throw Error('The pinned runner image must already exist locally; no pull is allowed');const metadata=JSON.parse(image.stdout)[0];if(metadata.Id!==c.imageId||metadata.Os!=='linux'||metadata.Config?.Labels?.['amu.runner.schema']!=='1'||Object.keys(metadata.Config?.Volumes||{}).length)throw Error('Image identity, OS, trusted entrypoint schema or implicit volumes mismatch');
   return {runtimeVersion:String(data.ServerVersion),imageId:c.imageId,dockerSha256:c.dockerSha256,checkedAt:new Date().toISOString()};
  }
@@ -68,6 +75,10 @@ export class DockerRuntime {
   if(this.busy||this.quarantined)throw Error('Runner busy or quarantined after incomplete cleanup');validateProfile(profile);validateManifest(files);if(contents.length!==files.length)throw Error('Source list mismatch');for(let i=0;i<files.length;i++)if(typeof contents[i]!=='string'||Buffer.byteLength(contents[i])!==files[i].bytes||hash(contents[i])!==files[i].sha256)throw Error('Source hash/size mismatch');
   this.busy=true;let directory='',container='';let cleanupVerified=false;
   try{await this.prerequisites();this.checkResources(profile);signal?.throwIfAborted();const id=crypto.randomUUID();container='amu-run-'+id;directory=path.join(this.config.workRoot,id);fs.mkdirSync(directory,{mode:0o755});for(let i=0;i<files.length;i++){const target=path.join(directory,files[i].path);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o755});fs.writeFileSync(target,contents[i],{flag:'wx',mode:0o444});}
+   // Explicit modes are necessary: a secure service umask (0077) otherwise makes
+   // inputs unreadable to container UID 1000 in the rootless user namespace.
+   // The enclosing private workRoot remains 0700; no keys or other files are exposed.
+   fs.chmodSync(directory,0o755);for(const file of files){const target=path.join(directory,file.path);for(let parent=path.dirname(target);parent!==directory;parent=path.dirname(parent))fs.chmodSync(parent,0o755);fs.chmodSync(target,0o444);}
    const result=await this.command(dockerArguments(this.config,container,directory,profile,mode),profile.limits.wallTimeMs,profile.limits.outputBytes,signal);let oomKilled=false;if(!result.reason){const inspected=await this.command(['--host',this.config.socket,'inspect','--format','{{json .State}}',container],5000);if(inspected.code!==0||inspected.reason)throw Error('Container result inspection failed');oomKilled=JSON.parse(inspected.stdout).OOMKilled===true;}return {...result,status:result.reason|| (oomKilled?'oom_killed':result.code===0?'passed':'failed'),oomKilled,sourceExecuted:mode==='project',containerId:container};
   }finally{
    if(container){try{const removed=await this.command(['--host',this.config.socket,'rm','--force',container],5000);const listing=await this.command(['--host',this.config.socket,'ps','--all','--filter','name=^/'+container+'$','--format','{{.Names}}'],5000);cleanupVerified=removed.code===0&&!removed.reason&&listing.code===0&&!listing.reason&&!listing.stdout.trim();}catch{/* quarantine: do not claim cancellation or cleanup succeeded */}if(!cleanupVerified)this.quarantined=true;}

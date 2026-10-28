@@ -1,6 +1,6 @@
 // Read-only Linux prerequisite probe. Does not start a container or activate execution.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
-import {loadConfig} from '../src/runner/service.ts';import {hash} from '../src/runner/protocol.ts';import {safeDirectory,assertLinuxHostBoundary,assertRunnerFreeSpace} from '../src/runner/docker-runtime.ts';
+import {loadConfig} from '../src/runner/service.ts';import {hash} from '../src/runner/protocol.ts';import {safeDirectory,assertLinuxHostBoundary,assertRunnerFreeSpace,assertRootlessDockerInfo} from '../src/runner/docker-runtime.ts';
 const checks=[];const check=(name,passed)=>{checks.push({name,passed:passed===true});if(passed!==true)throw Error(name);};
 try{
  check('dedicated non-root Linux process',process.platform==='linux'&&typeof process.getuid==='function'&&process.getuid()>0);
@@ -15,7 +15,7 @@ try{
  check('Docker binary hash matches explicit configuration',path.isAbsolute(config.runtime.dockerExecutable)&&!fs.lstatSync(config.runtime.dockerExecutable).isSymbolicLink()&&hash(fs.readFileSync(config.runtime.dockerExecutable))===config.runtime.dockerSha256);
  const dockerConfig=path.join(config.runtime.workRoot,'docker-config');safeDirectory(dockerConfig);check('empty private Docker client configuration',fs.readdirSync(dockerConfig).length===0&&fs.statSync(dockerConfig).uid===uid&&(fs.statSync(dockerConfig).mode&0o077)===0);
  const readDocker=args=>JSON.parse(execFileSync(config.runtime.dockerExecutable,['--host',socket,...args],{shell:false,timeout:5000,maxBuffer:65536,encoding:'utf8',env:{PATH:'/usr/local/bin:/usr/bin:/bin',DOCKER_CONFIG:dockerConfig},stdio:['ignore','pipe','pipe']}));
- const info=readDocker(['info','--format','{{json .}}']);check('rootless Linux with systemd cgroup v2 and seccomp',info.OSType==='linux'&&info.CgroupVersion==='2'&&info.CgroupDriver==='systemd'&&info.SecurityOptions?.some(v=>v.includes('rootless'))&&info.SecurityOptions?.some(v=>v.includes('seccomp')));
+ const info=readDocker(['info','--format','{{json .}}']);let runtimeInfoValid=false;try{assertRootlessDockerInfo(info);runtimeInfoValid=true;}finally{check('rootless Linux with systemd cgroup v2 and seccomp',runtimeInfoValid);}
  check('no resource-enforcement warnings',!info.Warnings?.some(v=>/cpu|memory|pids|cgroup|swap/i.test(v)));
  check('immutable image configured',/^sha256:[a-f0-9]{64}$/.test(config.runtime.imageId));const image=readDocker(['image','inspect',config.runtime.imageId])[0];check('local trusted runner image without implicit volumes',image?.Id===config.runtime.imageId&&image.Os==='linux'&&image.Config?.Labels?.['amu.runner.schema']==='1'&&!Object.keys(image.Config?.Volumes||{}).length);
  check('one small job fits current resources',os.availableParallelism()>=1&&os.freemem()>=1024**3);

@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';import {assertRootlessDockerInfo} from '../runner/docker-runtime.ts';
+const valid={OSType:'linux',CgroupVersion:'2',CgroupDriver:'systemd',ServerVersion:'29.8.2',SecurityOptions:['name=seccomp,profile=builtin','name=rootless'],Warnings:null};
+assert.equal(assertRootlessDockerInfo(valid).runtimeVersion,'29.8.2');
+for(const change of [v=>v.OSType='windows',v=>v.CgroupVersion='1',v=>v.CgroupDriver='none',v=>v.SecurityOptions=['name=seccomp'],v=>v.SecurityOptions=['name=rootless'],v=>v.Warnings=['No cpu cfs quota support'],v=>v.Warnings=['No memory limit support'],v=>v.Warnings=['No pids limit support'],v=>v.Warnings=['No swap limit support'],v=>v.Warnings={},v=>v.SecurityOptions={},v=>v.ServerVersion='']){const v=structuredClone(valid);change(v);assert.throws(()=>assertRootlessDockerInfo(v),/Rootless/);}
+assert.throws(()=>assertRootlessDockerInfo(null),/Rootless/);console.log('Shared rootless admission fails closed for missing limits/security/metadata; no Docker or project code executed');

@@ -46,4 +46,6 @@ Historischer Quellstand: **1.21.0 – gepinntes Qwen2.5-Coder-7B-Profil, Beschaf
 
 Historischer Quellstand: **1.22.0 – geprüfte Neustart-Evidenz, Sicherungen und konkreter Wiederanlaufplan**. Kein Neustart und kein Linux-Runner ausgeführt. [Sitzung 24: tatsächlicher Stand und separate Freigaben](docs/session24-restart-runner.md). Gezielte Prüfung: npm run test:session24.
 
-Aktueller Quellstand: **1.23.0 – Hypervisor nach Neustart korrekt erkennen und WSL-Bereitstellung nachvollziehbar prüfen**. Laufende API 1.22.0; tatsächliche Linux-/Containerabnahme separat. [Sitzung 25: Dienste, WSL und Freigaben](docs/session25-wsl-runner.md). npm run test:session25.
+Historischer Quellstand: **1.23.0 – Hypervisor nach Neustart korrekt erkennen und WSL-Bereitstellung nachvollziehbar prüfen**. Laufende API 1.22.0; tatsächliche Linux-/Containerabnahme separat. [Sitzung 25: Dienste, WSL und Freigaben](docs/session25-wsl-runner.md). npm run test:session25.
+
+Aktueller Quellstand: **1.24.0 – echter Rootless-Runner-Abnahmelauf, umask-sichere Eingaben und Core-Dump-Schutz**. Ein kleiner Qwen-Codekorrekturtest lief tatsächlich im Container; zentrale Produktionsaktivierung bleibt separat. [Sitzung 26: reale Ergebnisse und Grenzen](docs/session26-rootless-real-runner.md). npm run test:session26.

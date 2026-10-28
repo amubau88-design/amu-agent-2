@@ -20,3 +20,11 @@ if [ -e "$interop" ]; then
   printf '%s\n' -1 > "$interop"
 fi
 [ ! -e "$interop" ]
+# Apply only after the separate owner-approved WSL core policy is installed.
+if [ -f /etc/sysctl.d/60-amu-runner-core.conf ]; then
+  grep -qx 'kernel.core_pattern=core' /etc/sysctl.d/60-amu-runner-core.conf || exit 1
+  case "$(cat /proc/sys/kernel/core_pattern)" in
+    core|'|/wsl-capture-crash '*) printf '%s\n' core > /proc/sys/kernel/core_pattern ;;
+    *) exit 1 ;;
+  esac
+fi

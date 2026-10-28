@@ -6,9 +6,13 @@ const mode=process.argv[2],profile=JSON.parse(process.argv[3]);
 setTimeout(()=>process.exit(124),profile.limits.wallTimeMs+500).unref();
 if(mode==='acceptance-memory'){const buffers=[];for(let i=0;i<32;i++)buffers.push(Buffer.alloc(8*1024*1024,0x5a));process.exit(1);}
 if(mode==='acceptance'){
+ const mountFlags=target=>{const entry=fs.readFileSync('/proc/self/mountinfo','utf8').split('\n').map(line=>line.split(' ')).find(fields=>fields[4]===target);return new Set((entry?.[5]||'').split(','));};
  const assertions={nonRoot:process.getuid()===1000,networkOnlyLoopback:Object.keys(os.networkInterfaces()).every(k=>k==='lo'),noSecrets:!Object.keys(process.env).some(k=>/TOKEN|SECRET|PASSWORD|API_KEY|DOCKER_HOST/i.test(k)),inputReadOnly:false,rootReadOnly:false,noNewPrivileges:/NoNewPrivs:\s+1/.test(fs.readFileSync('/proc/self/status','utf8')),capabilitiesDropped:/CapEff:\s+0+\s/.test(fs.readFileSync('/proc/self/status','utf8'))};
  try{fs.writeFileSync('/input/write-probe','bad');}catch{assertions.inputReadOnly=true;}try{fs.writeFileSync('/etc/amu-write-probe','bad');}catch{assertions.rootReadOnly=true;}
+ // A non-root EACCES alone cannot establish a read-only mount.
+ assertions.inputReadOnly&&=mountFlags('/input').has('ro');assertions.rootReadOnly&&=mountFlags('/').has('ro');
  const cgroup={memory:fs.readFileSync('/sys/fs/cgroup/memory.max','utf8').trim(),pids:fs.readFileSync('/sys/fs/cgroup/pids.max','utf8').trim(),cpu:fs.readFileSync('/sys/fs/cgroup/cpu.max','utf8').trim()};
+ assertions.coreDumpLimitZero=/Max core file size\s+0\s+0\s+bytes/.test(fs.readFileSync('/proc/self/limits','utf8'));
  assertions.seccompFiltering=/Seccomp:\s+2/.test(fs.readFileSync('/proc/self/status','utf8'));
  assertions.resourceFiles=Number(cgroup.memory)===profile.limits.memoryMiB*1048576&&Number(cgroup.pids)===profile.limits.processCount&&cgroup.cpu.split(' ').map(Number)[0]/cgroup.cpu.split(' ').map(Number)[1]===profile.limits.cpuCount;
  assertions.networkBlocked=await new Promise(resolve=>{const socket=net.connect({host:'192.0.2.1',port:9});socket.setTimeout(500,()=>{socket.destroy();resolve(false);});socket.once('connect',()=>{socket.destroy();resolve(false);});socket.once('error',error=>resolve(['ENETUNREACH','EHOSTUNREACH','EPERM'].includes(error.code)));});
