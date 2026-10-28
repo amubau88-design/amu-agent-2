@@ -65,6 +65,7 @@ export function createAmuApiServer(): http.Server {
         }
         try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'Invalid JSON'); }
       }
+      if(client.admin&&pathname==='/api/central/coding/roles/activate'&&amuCore.isBusy())throw new EngineError(409,'Pause development work before model role activation');
       if(await codingManagementRoute(req,res,pathname,body,client.admin))return;
       if(pathname.startsWith('/api/core/runner/')){requireScope(client,'core:tasks');requireRole(client,['admin','developer']);if(await runnerManagementRoute(req,res,pathname,body,client.id,client.admin))return;}
       if(pathname.startsWith('/api/core/change-sets/')||pathname==='/api/core/runner'||pathname.startsWith('/api/core/test-runs/')){
