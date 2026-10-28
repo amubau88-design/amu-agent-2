@@ -1,9 +1,16 @@
 import fs from 'node:fs';import path from 'node:path';import net from 'node:net';import https from 'node:https';import crypto from 'node:crypto';import type {TLSSocket} from 'node:tls';
 import {DockerRuntime,safeDirectory,type RuntimeConfig} from './docker-runtime.ts';import {validateAcceptance} from './acceptance.ts';
-import {adapterModules,hash,uuid,validateManifest,validateProfile,profileDigest} from './protocol.ts';
+import {adapterModules,hash,uuid,validateManifest,validateProfile,profileDigest} from './protocol.ts';import os from 'node:os';
 import {writePrivateJson} from '../central/storage.ts';
 export type ServiceConfig={serverId:string;host:string;port:number;caFile:string;certificateFile:string;keyFile:string;clientCertificateSha256:string;runtime:RuntimeConfig;profiles:ReturnType<typeof validateProfile>[];reviewedAcceptanceSha256?:string};
 export const adapterDigest=()=>{const extension=path.extname(new URL(import.meta.url).pathname);return hash(Buffer.concat(adapterModules.map(name=>fs.readFileSync(new URL('./'+name+extension,import.meta.url)))));};
+/** Validate the actual server identity, not just PEM existence. Never returns key material. */
+export function runnerTlsStatus(c:Pick<ServiceConfig,'caFile'|'certificateFile'|'keyFile'|'host'>,now=Date.now()){
+ try{const ca=new crypto.X509Certificate(fs.readFileSync(c.caFile)),cert=new crypto.X509Certificate(fs.readFileSync(c.certificateFile));for(const x of [ca,cert])if(Date.parse(x.validFrom)>now||Date.parse(x.validTo)<=now)throw Error();
+  if(!ca.ca||cert.ca||!cert.checkIssued(ca)||!cert.verify(ca.publicKey)||!cert.checkIP(c.host)||!cert.keyUsage?.includes('1.3.6.1.5.5.7.3.1')||!cert.checkPrivateKey(crypto.createPrivateKey(fs.readFileSync(c.keyFile))))throw Error();
+  return {certificateSha256:hash(cert.raw),caSha256:hash(ca.raw),validTo:cert.validTo,expiringSoon:Date.parse(cert.validTo)-now<14*86400000};
+ }catch{throw Error('Runner server TLS identity is expired, invalid, mismatched or has wrong server purpose/SAN');}
+}
 export function loadConfig(file:string):ServiceConfig{
  if(!path.isAbsolute(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>65536)throw Error('Explicit bounded runner configuration file required');safeDirectory(path.dirname(file));
  if(process.platform==='linux'&&(fs.statSync(file).uid!==process.getuid?.()||(fs.statSync(file).mode&0o077)!==0))throw Error('Runner configuration must be owned by the dedicated user with mode 0600');
@@ -11,7 +18,7 @@ export function loadConfig(file:string):ServiceConfig{
  const privateIP=new net.BlockList();for(const [ip,bits]of [['127.0.0.0',8],['10.0.0.0',8],['172.16.0.0',12],['192.168.0.0',16]]as const)privateIP.addSubnet(ip,bits);privateIP.addAddress('::1','ipv6');privateIP.addSubnet('fc00::',7,'ipv6');if(!privateIP.check(c.host,net.isIP(c.host)===6?'ipv6':'ipv4'))throw Error('Only an explicit private listener IP is allowed');
  for(const name of ['caFile','certificateFile','keyFile']){if(!path.isAbsolute(c[name])||fs.lstatSync(c[name]).isSymbolicLink()||fs.statSync(c[name]).size>65536)throw Error('Explicit bounded TLS PEM files required');safeDirectory(path.dirname(c[name]));}
  if(process.platform==='linux'&&(fs.statSync(c.keyFile).uid!==process.getuid?.()||(fs.statSync(c.keyFile).mode&0o077)!==0))throw Error('TLS private key must have dedicated ownership and mode 0600');
- if(!Array.isArray(c.profiles)||c.profiles.length>20)throw Error('At most twenty explicitly configured profiles');c.profiles=c.profiles.map(validateProfile);if(new Set(c.profiles.map((p:any)=>p.id)).size!==c.profiles.length)throw Error('Duplicate profile identity');if(c.reviewedAcceptanceSha256!==undefined&&!/^[a-f0-9]{64}$/.test(c.reviewedAcceptanceSha256))throw Error('Invalid reviewed acceptance digest');return c;
+ if(!Array.isArray(c.profiles)||c.profiles.length>20)throw Error('At most twenty explicitly configured profiles');c.profiles=c.profiles.map(validateProfile);if(new Set(c.profiles.map((p:any)=>p.id)).size!==c.profiles.length)throw Error('Duplicate profile identity');if(c.reviewedAcceptanceSha256!==undefined&&!/^[a-f0-9]{64}$/.test(c.reviewedAcceptanceSha256))throw Error('Invalid reviewed acceptance digest');runnerTlsStatus(c);return c;
 }
 export function acceptanceStatus(config:ServiceConfig){
  const file=path.join(config.runtime.workRoot,'acceptance.json');if(!config.reviewedAcceptanceSha256||!fs.existsSync(file)||fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>65536)return {reviewed:false,reason:'No independently reviewed local acceptance report'};
@@ -19,6 +26,7 @@ export function acceptanceStatus(config:ServiceConfig){
  return {reviewed,runtimeVersion:r.runtimeVersion,reason:reviewed?'Local acceptance report reviewed; central AMU activation remains separate':'Stale, incomplete or mismatched acceptance report'};}catch{return {reviewed:false,reason:'Unreadable acceptance report; execution remains blocked'};}
 }
 export function createRunnerService(config:ServiceConfig,runtime=new DockerRuntime(config.runtime),recovery?:{verifiedNoOwnedContainers:boolean;ownerDigest:string;checkedAt:string}){
+ const originalTls=runnerTlsStatus(config);
  let stopping=false;let shutdownPromise:Promise<void>|undefined;
  safeDirectory(config.runtime.workRoot);const jobs=new Map<string,AbortController>(),seen=new Set<string>();const journal=path.join(config.runtime.workRoot,'reports');if(!fs.existsSync(journal))fs.mkdirSync(journal,{mode:0o700});safeDirectory(journal);
  const persist=(id:string,value:unknown)=>writePrivateJson(path.join(journal,id+'.json'),value,true);
@@ -27,12 +35,14 @@ export function createRunnerService(config:ServiceConfig,runtime=new DockerRunti
   if(stopping){res.writeHead(503,{'Connection':'close','Content-Type':'application/json'});res.end(JSON.stringify({error:'Runner stopping',executed:false}));return;}
   res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');const socket=req.socket as TLSSocket;const certificate=socket.getPeerCertificate();if(!socket.authorized||!certificate.raw||hash(certificate.raw)!==config.clientCertificateSha256){res.writeHead(403);res.end(JSON.stringify({error:'Runner client identity denied'}));return;}
   try{
+   let liveTls;try{liveTls=runnerTlsStatus(config);if(liveTls.certificateSha256!==originalTls.certificateSha256||liveTls.caSha256!==originalTls.caSha256)throw Error();}catch{res.writeHead(503);res.end(JSON.stringify({error:'Runner TLS identity expired or changed; controlled restart required',executed:false}));return;}
+   const peer=new crypto.X509Certificate(certificate.raw);if(Date.parse(peer.validFrom)>Date.now()||Date.parse(peer.validTo)<=Date.now()||!peer.keyUsage?.includes('1.3.6.1.5.5.7.3.2')){res.writeHead(403);res.end(JSON.stringify({error:'Runner client certificate date or purpose denied',executed:false}));return;}
    if(req.method!=='POST'||!['/runner/v1/capabilities','/runner/v1/attestation','/runner/v1/validate','/runner/v1/execute','/runner/v1/cancel','/runner/v1/result'].includes(req.url||'')){res.writeHead(404);res.end(JSON.stringify({error:'Unknown fixed runner endpoint'}));return;}
    if(!/^application\/json\b/.test(String(req.headers['content-type']))){res.writeHead(415);res.end('{}');return;}
    let bytes=0;const chunks:Buffer[]=[];for await(const chunk of req){bytes+=chunk.length;if(bytes>786432){res.writeHead(413);res.end('{}');req.resume();return;}chunks.push(chunk);}const body=JSON.parse(Buffer.concat(chunks).toString());if(body.protocolVersion!==1||!uuid(body.challenge))throw Error('Protocol version and fresh UUID challenge required');const identity={protocolVersion:1,serverId:config.serverId,challenge:body.challenge};
    if(req.url==='/runner/v1/capabilities'){
     let ready=false,version='unavailable';try{const p=await runtime.prerequisites();version=p.runtimeVersion;const accepted=acceptanceStatus(config);ready=accepted.reviewed&&accepted.runtimeVersion===version;}catch{/* not available */}
-    res.end(JSON.stringify({...identity,runtimeVersion:version,isolation:{networkDisabled:ready,unprivileged:ready,credentialsAbsent:ready,resourceLimitsEnforced:ready,processTreeCancellation:ready,disposableFilesystem:ready},acceptance:acceptanceStatus(config),executionEnabled:ready,centralActivationRequired:true}));return;
+    res.end(JSON.stringify({...identity,runtimeVersion:version,resources:{logicalCpus:os.availableParallelism(),totalMemoryBytes:os.totalmem(),freeMemoryBytes:os.freemem(),runnerProcessRssBytes:process.memoryUsage().rss,activeJobs:jobs.size,maxParallelJobs:1},serverCertificate:liveTls,isolation:{networkDisabled:ready,unprivileged:ready,credentialsAbsent:ready,resourceLimitsEnforced:ready,processTreeCancellation:ready,disposableFilesystem:ready},acceptance:acceptanceStatus(config),executionEnabled:ready,centralActivationRequired:true}));return;
    }
    if(req.url==='/runner/v1/cancel'){if(!uuid(body.runId)||!jobs.has(body.runId)){res.writeHead(404);res.end('{}');return;}jobs.get(body.runId)!.abort();res.end(JSON.stringify({...identity,runId:body.runId,status:'cancelling'}));return;}
    if(req.url==='/runner/v1/attestation'){const accepted=acceptanceStatus(config);if(!accepted.reviewed){res.writeHead(423);res.end(JSON.stringify({...identity,accepted:false,executed:false}));return;}const current=await runtime.prerequisites();if(current.runtimeVersion!==accepted.runtimeVersion)throw Error('Daemon changed');const bytes=fs.readFileSync(path.join(config.runtime.workRoot,'acceptance.json'));res.end(JSON.stringify({...identity,accepted:true,report:JSON.parse(bytes.toString()),fileSha256:hash(bytes),adapterDigest:adapterDigest()}));return;}
