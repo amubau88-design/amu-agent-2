@@ -1,0 +1,3 @@
+/** Continue only known ordinary test failures in an explicitly requested bounded batch. */
+export function canCollectNext(collect:boolean,result:any){return collect&&result.status==='failed'&&result.executed===true&&result.result?.sourceExecuted===true&&result.result?.status==='failed'&&result.result?.oomKilled!==true&&Number.isInteger(result.result?.code)&&result.result.code>0;}
+export function batchStatus(results:any[],expected:number,current:string){if(!['running','passed','failed'].includes(current))return current;return results.length===expected?results.every(r=>r.status==='passed')?'passed':results.some(r=>r.status==='failed')?'failed':current:current;}

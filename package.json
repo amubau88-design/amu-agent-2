@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.31.0",
+  "version": "1.32.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -62,7 +62,8 @@
     "test:session31": "node src/tests/session31-protocol.test.mjs",
     "test:session32": "node src/tests/session32-multifile.test.mjs && node src/tests/session32-controller.test.mjs",
     "test:session33": "node src/tests/session33-provenance.test.mjs && node src/tests/session33-controller.test.mjs && node src/tests/session33-migration.test.mjs",
-    "migration:check": "node scripts/migration-readiness.mjs"
+    "migration:check": "node scripts/migration-readiness.mjs",
+    "test:session34": "node src/tests/session34-policy.test.mjs && node src/tests/session34-chain.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",
