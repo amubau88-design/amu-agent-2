@@ -1,0 +1,28 @@
+# TEMPLATE ONLY: not installed or qualified on the future target machine.
+[Unit]
+Description=AMU AI Engine supervised local API
+After=network.target
+
+[Service]
+Type=simple
+User=amu-ai
+Group=amu-ai
+WorkingDirectory=/opt/amu-ai/app
+EnvironmentFile=/etc/amu-ai/engine.env
+ExecStart=/usr/bin/node /opt/amu-ai/app/scripts/supervise.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

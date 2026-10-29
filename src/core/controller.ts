@@ -1,12 +1,13 @@
+import {repairMergePlan} from './repair-merge.ts';
 import {evidenceFinalizationReady} from './agent-finalization.ts';
-import {readChangeSet} from './change-sets.ts';
+import {readChangeSet,createChangeSet} from './change-sets.ts';
 import {assertEditPolicy} from './anchored-edits.ts';
 import {canScheduleRepair,repairFilesFor} from './repair-policy.ts';
 import {inspectAgentAction} from './agent-inspection.ts';
 import {remoteExecutionBusy} from './runner-lifecycle.ts';
 import {runnerProfile,createCandidateSnapshot} from './runner-preflight.ts';
 import {requiredVerification,prepareExecutionPlan,executePlan,executionReports} from './runner-executions.ts';
-import {requireCandidateCheck} from './candidate-checks.ts';
+import {checkCandidate,requireCandidateCheck} from './candidate-checks.ts';
 import {developmentGit} from './development-git.ts';
 import {writePrivateJson} from '../central/storage.ts';
 import {initializeAgent,agentSources,runCodingAgent,reconcileAgentChangeSet,recoverAgentCheckpoint,type AgentState} from './coding-agent.ts';
@@ -120,6 +121,13 @@ export class AMUCore {
     const extra=options.additionalSteps??4;if(!Number.isInteger(extra)||extra<1||extra>6)throw new EngineError(400,'additionalSteps must be between 1 and 6');
     task.maxSteps=task.agent?Math.min(task.agent.limits.maxTotalSteps,task.agent.usage.steps+extra):Math.min(20,Math.max(task.maxSteps||6,task.steps.filter(s=>s.action!=='apply_approved').length)+extra);task.state='planning';task.ownerPid=process.pid;checkpoint(task,'explicit resume approved');
     void this.run(task).catch(e=>recordSystemEvent('core_resume_failure',{taskId:id,category:e.name}));return task;
+  }
+  prepareRepairMerge(id:string,repairId:string,owner:string,admin=false){
+    if(!admin)throw new EngineError(403,'Administrator repair-chain review required');if(typeof repairId!=='string'||!/^[a-f0-9-]{36}$/.test(repairId))throw new EngineError(400,'Explicit repair task identity required');if(this.isBusy())throw new EngineError(409,'Stop development operations before merging repair evidence');const parent=this.get(id,owner,true),repair=this.get(repairId,owner,true);const sources=(task:CoreTask)=>{const w=workspace(task.workspaceId!,task.owner);return agentSources(task).map(s=>{if(task.sourceHashes?.[s.file]!==s.sha256)throw new EngineError(409,'Task source changed since checkpoint');return {path:path.posix.relative(w.root,s.file),content:s.content,sha256:s.sha256};});};return repairMergePlan(parent,repair,sources(parent),sources(repair),readChangeSet(repair.agent?.pendingChangeSet||'',repair.owner));
+  }
+  async stageRepairMerge(id:string,body:any,owner:string,admin=false,signal?:AbortSignal){
+    const plan=this.prepareRepairMerge(id,body?.repairTaskId,owner,admin);if(body?.approve!==true||body.digest!==plan.digest)throw new EngineError(403,'Approve the exact repaired-candidate plan');const task=this.get(id,owner,true);this.committing=true;
+    try{const record=createChangeSet(task.workspaceId!,{changes:plan.changes},task.owner,false,task.id);task.agent!.pendingChangeSet=record.id;task.agent!.changeSets.push(record.id);task.agent!.requireCandidateChecks=true;(task.agent as any).repairMerge={planDigest:plan.digest,repairTaskId:plan.repairTaskId,repairPackageId:plan.repairPackageId,repairPackageDigest:plan.repairPackageDigest};task.state='blocked';task.steps.push({action:'repaired_candidate_staged',previousError:task.error||null,previousModuleCheck:(task.agent as any).moduleCheck||null,changeSetId:record.id,repairTaskId:plan.repairTaskId,planDigest:plan.digest,budgetsReset:false,at:new Date().toISOString()});(task.agent as any).moduleCheck=plan.moduleCheck;checkpoint(task,'Repaired package staged; no source applied or budget reset');const checked=await checkCandidate(record.id,task.owner,false,signal);task.agent!.candidateChecks=checked;task.state=checked.status==='passed'?'review':'blocked';if(checked.status==='passed')delete task.error;else task.error=checked.error||'Repaired candidate syntax check did not pass';task.result=checked.status==='passed'?'Reparaturkette als Paket vorbereitet; neue isolierte Pflichtprüfungen und separate Eigentümerfreigabe erforderlich.':'Reparaturpaket nicht bestanden; keine Quelldatei übernommen.';checkpoint(task,'Repaired candidate syntax checked; isolated checks remain mandatory');return {changeSetId:record.id,digest:record.digest,status:task.state,checks:checked,budgetsReset:false,applied:false,requiresFreshVerification:true};}finally{this.committing=false;}
   }
   assertChangeSetAction(record:any,action:string){if(this.committing||remoteExecutionBusy())throw new EngineError(409,'A task commit is running; package changes are temporarily blocked');if(!record.taskId)return;const task=this.get(record.taskId,record.owner);if(this.active?.id===task.id)throw new EngineError(409,'Pause the running task before changing its package');if(action==='apply'&&task.agent?.requireCandidateChecks)requireCandidateCheck(record.id,record.digest,record.owner);if(action==='apply'&&task.agent?.verificationProfiles?.length)requiredVerification(record.id,task.agent.verificationProfiles,record.owner);if(action==='apply'&&task.agent?.pendingChangeSet!==record.id)throw new EngineError(409,'Package is not the task current review');if(action==='apply'&&task.agent)for(const source of agentSources(task))if(task.sourceHashes?.[source.file]!==source.sha256)throw new EngineError(409,'Task source changed before approval');if(action==='apply'&&task.state!=='review')throw new EngineError(409,'Task is not awaiting package approval');}
   async inspect(id:string,name:string,owner:string,admin=false){const task=this.get(id,owner,admin);const result=await inspectAgentAction(task,name,owner,admin);if(name==='prepare_commit'){task.agent!.commitPlan=result;checkpoint(task,'exact task commit plan prepared; no Git write');}return result;}

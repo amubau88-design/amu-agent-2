@@ -1,0 +1,21 @@
+import {EngineError} from '../inference/models.ts';
+import {contentHash} from './tools.ts';
+import {assertEditPolicy} from './anchored-edits.ts';
+import {localModuleChecks} from './module-contracts.ts';
+type Source={path:string;content:string|null;sha256:string|null};
+/** Pure provenance check: no source writes, model calls, execution approval or budget reset. */
+export function repairMergePlan(parent:any,repair:any,parentSources:Source[],repairSources:Source[],pkg:any){
+ if(!parent.agent?.guidedEdits||!repair.agent?.guidedEdits||parent.id===repair.id||parent.owner!==repair.owner||parent.workspaceId===repair.workspaceId||!['blocked','failed','interrupted','paused'].includes(parent.state)||repair.state!=='review')throw new EngineError(409,'Separate stopped parent and reviewed same-owner guided repair required');
+ if(!parent.agent.verificationProfiles?.length||pkg.taskId!==repair.id||pkg.owner!==repair.owner||pkg.workspaceId!==repair.workspaceId||pkg.id!==repair.agent.pendingChangeSet||pkg.status!=='review'||repair.agent.changeSets?.at(-1)!==pkg.id)throw new EngineError(409,'Current repair package and required parent test profiles must be bound');
+ if(!parentSources.length||parentSources.length>12||new Set(parentSources.map(s=>s.path)).size!==parentSources.length||parentSources.length!==repairSources.length||new Set(repairSources.map(s=>s.path)).size!==repairSources.length)throw new EngineError(409,'Repair must retain the complete declared parent context');
+ const originals=new Map(parentSources.map(s=>[s.path,s])),drafts=parent.agent.editDrafts||{},inputs=new Map(repairSources.map(s=>[s.path,s])),final=new Map<string,string>();
+ for(const p of Object.keys(drafts))if(!originals.has(p))throw new EngineError(403,'Parent draft exceeds declared files');
+ for(const s of parentSources){const d=drafts[s.path],input=inputs.get(s.path);if(s.content===null||s.sha256!==contentHash(s.content)||d&&(d.baseHash!==s.sha256||typeof d.content!=='string'))throw new EngineError(409,'Parent source or retained draft provenance changed');const candidate=d?.content??s.content;if(!input||input.content!==candidate||input.sha256!==contentHash(candidate))throw new EngineError(409,'Repair input differs from the exact retained candidate');final.set(s.path,candidate);}
+ if(!Array.isArray(pkg.changes)||!pkg.changes.length||pkg.changes.length>12||pkg.changes.some((c:any)=>!c||typeof c.path!=='string'))throw new EngineError(409,'Bound repair changes required');
+ if(pkg.digest!==contentHash(JSON.stringify({workspaceId:pkg.workspaceId,changes:pkg.changes.map((c:any)=>({path:c.path,before:c.before,after:c.after,baseHash:c.baseHash,afterHash:c.afterHash})),taskId:pkg.taskId})))throw new EngineError(409,'Repair package digest integrity failed');
+ if(!pkg.changes?.length||pkg.changes.length>12||new Set(pkg.changes.map((c:any)=>c.path)).size!==pkg.changes.length)throw new EngineError(409,'Bound repair changes required');
+ for(const c of pkg.changes){const input=inputs.get(c.path),d=repair.agent.editDrafts?.[c.path];if(!input||c.before!==input.content||c.baseHash!==input.sha256||typeof c.after!=='string'||c.afterHash!==contentHash(c.after)||d?.content!==c.after||d.baseHash!==input.sha256)throw new EngineError(409,'Repair output no longer matches its native draft and input');final.set(c.path,c.after);}
+ const changes=parentSources.filter(s=>final.get(s.path)!==s.content).map(s=>({path:s.path,baseHash:s.sha256,content:final.get(s.path)!}));if(!changes.length)throw new EngineError(422,'No repaired changes');assertEditPolicy(changes,parentSources,parent.agent);
+ const moduleCheck=localModuleChecks([...final].map(([path,content])=>({path,content})));if(!moduleCheck.passed)throw new EngineError(422,'Repaired candidate still violates local module contracts');
+ const plan={version:1,parentTaskId:parent.id,repairTaskId:repair.id,owner:parent.owner,workspaceId:parent.workspaceId,repairPackageId:pkg.id,repairPackageDigest:pkg.digest,parentState:parent.state,parentUsage:{...parent.agent.usage},parentContext:parentSources.map(s=>({path:s.path,sha256:s.sha256})),repairContext:repairSources.map(s=>({path:s.path,sha256:s.sha256})),changes,moduleCheck,requiresFreshVerification:true,requiresSeparateApplicationApproval:true,budgetsReset:false};return {...plan,digest:contentHash(JSON.stringify(plan))};
+}
