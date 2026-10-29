@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import vm from 'node:vm';
 import ts from 'typescript';
 const state = fs.mkdtempSync('scratch/embedded-verification-');
 process.env.AMU_CENTRAL_STATE_DIR = state;
@@ -67,9 +66,13 @@ try {
   assert.equal(task.state,'review',JSON.stringify(task));assert.equal(task.proposals.length,1);
   const proposal=await(await call('/api/core/proposals/'+task.proposals[0])).json() as any;assert.equal(proposal.status,'proposed');assert.equal(fs.readFileSync(file,'utf8'),source.content);
   const apply=await call('/api/core/proposals/'+proposal.id+'/apply',{});assert.equal(apply.status,200);const applied=await apply.json() as any;assert.equal(contentHash(fs.readFileSync(applied.backup,'utf8')),source.sha256);
-  const output=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
-  const sandbox={exports:{}} as any;vm.runInNewContext(output,sandbox,{timeout:1000});assert.equal(sandbox.exports.add(7,4),11);
-  evidence.checks.push('real local model repair decision, review gate, controlled apply, backup preservation, corrected code behavior');
+  // Generated source is inspected only. node:vm is not an execution boundary.
+  const parsed=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+  assert.equal((parsed as ts.SourceFile & {parseDiagnostics:readonly ts.Diagnostic[]}).parseDiagnostics.length,0);
+  const add=parsed.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='add') as ts.FunctionDeclaration|undefined;
+  assert.ok(add?.body);const returned=add.body.statements.find(ts.isReturnStatement)?.expression;
+  assert.ok(returned&&ts.isBinaryExpression(returned)&&returned.operatorToken.kind===ts.SyntaxKind.PlusToken);
+  evidence.checks.push('real local model repair decision, review gate, controlled fixture apply, backup preservation, non-executing syntax/AST inspection; behavior requires isolated runner');
   assert.equal(blockedModelHttpCalls,0);
   evidence.engine=amuInference.status();evidence.finishedAt=new Date().toISOString();evidence.passed=true;
   console.log(JSON.stringify(evidence,null,2));

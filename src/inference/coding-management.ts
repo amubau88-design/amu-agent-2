@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {smallCoderQualification} from './qualification.ts';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -13,7 +14,7 @@ export async function codingRuntimeStatus(){
  const hardware=await hardwareInventory(),installed=listLocalModels(),active=amuInference.status();
  const profiles=await Promise.all(codingProfiles.map(async profile=>{
   const models=installed.filter(m=>(m.profileId||'local-gguf')===profile.id);
-  const assessment=await Promise.all(models.map(async model=>{try{return {modelId:model.id,filename:model.filename,path:'scratch/models/'+model.filename,sha256:model.sha256,license:model.license,...await assessModel(model.id,0,Math.min(profile.defaultContext,platform.contextSize))};}catch(error){return {modelId:model.id,error:(error as Error).message,loadable:false};}}));
+  const assessment=await Promise.all(models.map(async model=>{try{return {modelId:model.id,filename:model.filename,path:path.join(modelDirectory,model.filename),sha256:model.sha256,license:model.license,...await assessModel(model.id,0,Math.min(profile.defaultContext,platform.contextSize))};}catch(error){return {modelId:model.id,error:(error as Error).message,loadable:false};}}));
   const expectedRam=Math.ceil(profile.minimumWeightBytes*1.2+512*1024**2),budget=memoryBudget();
   let acquisition=null,freeDiskBytes=0;if(profile.repository){try{const disk=fs.statfsSync(modelDirectory);freeDiskBytes=disk.bavail*disk.bsize;acquisition=codingAcquisitionPlan(profile,freeDiskBytes,budget);}catch{acquisition={resourceFit:false,reasons:['Model filesystem capacity unavailable'],estimatedRamBytes:expectedRam,willDownload:false,willLoad:false};}}
   const assessedRam=acquisition?.estimatedRamBytes??expectedRam;

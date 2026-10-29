@@ -1,3 +1,4 @@
+import {evidenceFinalizationReady} from './agent-finalization.ts';
 import {readChangeSet} from './change-sets.ts';
 import {assertEditPolicy} from './anchored-edits.ts';
 import {canScheduleRepair,repairFilesFor} from './repair-policy.ts';
@@ -108,7 +109,7 @@ export class AMUCore {
     if(this.active||this.committing)throw new EngineError(429,'Another task is running');
     const task=this.get(id,owner,adminOverride);
     if(!['paused','interrupted','failed','blocked'].includes(task.state))throw new EngineError(409,'Task cannot be resumed in its current state');
-    if(task.agent?task.agent.usage.steps>=task.agent.limits.maxTotalSteps:task.steps.filter(s=>s.action!=='apply_approved').length>=20)throw new EngineError(409,'Total task step budget exhausted; create a new scoped task');
+    if(task.agent?task.agent.usage.steps>=task.agent.limits.maxTotalSteps&&!evidenceFinalizationReady(task.agent,agentSources(task)):task.steps.filter(s=>s.action!=='apply_approved').length>=20)throw new EngineError(409,'Total task step budget exhausted; create a new scoped task');
     if(task.workspaceId)for(const file of task.files)authorizeWorkspaceFile(task.workspaceId,file,task.owner,'read_file');
     const sources=task.agent?agentSources(task):task.files.map(readControlled);const changes=sources.some(s=>task.sourceHashes?.[s.file]!==s.sha256);
     if(changes&&options.acceptSourceChanges!==true)throw new EngineError(409,'Source differs from checkpoint; explicit re-analysis approval required');
