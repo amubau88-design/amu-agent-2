@@ -8,3 +8,4 @@
 *.bat text eol=crlf
 scripts/isolated-runner/*.example text eol=lf
 *.sh text eol=lf
+docs/deployment/*.example text eol=lf
