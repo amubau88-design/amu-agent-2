@@ -1,3 +1,4 @@
+import {createCandidateSnapshot} from '../core/runner-preflight.ts';
 import {candidateCheck,checkCandidate} from '../core/candidate-checks.ts';
 import {runnerManagementRoute} from '../core/runner-routes.ts';
 import {gitRuntimeStatus,configureGitRuntime} from '../core/git-runtime.ts';
@@ -73,6 +74,7 @@ export function createAmuApiServer(): http.Server {
         if(pathname==='/api/core/runner'&&req.method==='GET')result=runnerCapabilities();
         else if(/^\/api\/core\/test-runs\/[a-f0-9-]{36}\/cancel$/.test(pathname)&&req.method==='POST')result=cancelTest(pathname.split('/').at(-2)!,client.id,client.admin);
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/checks$/.test(pathname)){const id=pathname.split('/').at(-2)!;if(req.method==='GET')result=candidateCheck(id,client.id,client.admin);else if(req.method==='POST'){const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});result=await checkCandidate(id,client.id,client.admin,AbortSignal.any([controller.signal,AbortSignal.timeout(30000)]));amuCore.reconcileChangeSet(readChangeSet(id,client.id,client.admin));}else throw new ApiError(405,'Method not allowed');}
+        else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/snapshot$/.test(pathname)&&req.method==='POST'){if(!client.admin)throw new ApiError(403,'Administrator candidate snapshot preparation required');result=createCandidateSnapshot(pathname.split('/').at(-2)!,body?.files,client.id,true);}
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}$/.test(pathname)&&req.method==='GET')result=readChangeSet(pathname.split('/').at(-1)!,client.id,client.admin);
         else if(/^\/api\/core\/change-sets\/[a-f0-9-]{36}\/(apply|restore|reject)$/.test(pathname)&&req.method==='POST'){const packageId=pathname.split('/').at(-2)!,action=pathname.split('/').at(-1)!;amuCore.assertChangeSetAction(readChangeSet(packageId,client.id,client.admin),action);result=actOnChangeSet(packageId,action,body,client.id,client.admin);amuCore.reconcileChangeSet(result);}
         else throw new ApiError(404,'Unknown development endpoint');res.end(JSON.stringify(result));return;

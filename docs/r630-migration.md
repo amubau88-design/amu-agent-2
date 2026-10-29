@@ -24,3 +24,11 @@ Diese Anleitung verändert weder den derzeitigen Rechner noch den R630. RAM, SSD
 - Ein Testfehler, nicht ausgeführter Test oder unbekanntes Ergebnis blockiert die Übernahme. Eigentümerfreigaben bleiben erforderlich.
 
 Ein R630-Umzug, reale stärkere Modellmessungen und ein Lasttest auf dessen Hardware stehen noch aus. Diese Arbeiten werden durch zusätzliche RAM-/SSD-Kapazität ermöglicht, aber dadurch nicht automatisch bestanden.
+
+## Ergänzung Sitzung 32: reproduzierbare Mehrdatei-Abnahme
+
+Vor dem Umzug den aktuellen qualifizierten Stand und den Prüfbericht `docs/session32-multifile.md` übertragen. `npm run test:session32` umfasst ausschließlich die vertrauenswürdigen statischen/Controller-Regressionen; es ist keine Container- oder Hardwareabnahme. Generierte Projektmodule niemals mit node:vm oder direkten Build-/Testbefehlen auf dem Host ausführen. Reale Projekte nur mit gebundenem Snapshot, den exakt provisionierten Profilen, unabhängiger aktueller Isolationsabnahme und separater Eigentümerfreigabe prüfen.
+
+Die statische Schnittstellenprüfung erkennt direkte benannte ESM-Importe zwischen ausdrücklich freigegebenen Dateien. CommonJS, unbekannte oder abgeschnittene Dateien, dynamische Auflösung und Stern-Reexports werden nicht als vollständig bewiesen behandelt. Build und Vertragstests bleiben verbindlich.
+
+Der derzeit tatsächlich geprüfte Inferenzpfad ist CPU-basiert. GPU-Offloading ist im Worker deaktiviert. Ein GPU-Betriebsprofil, passende bereits lokal installierte native Bibliotheken, ausreichender nachgewiesener VRAM und ein realer GPU-/Fallback-Test müssen auf dem Zielsystem gesondert qualifiziert werden. Weder GPU-Unterstützung noch bestimmte R630-Ausstattung werden durch die konfigurierbaren GGUF-Modellprofile zugesagt. Modellverzeichnis, Modellidentität, Kontext und CPU-Threadlimits können bereits unabhängig vom Programmstand verwaltet werden.
