@@ -1,0 +1,4 @@
+/** Cancellation must remain available after polling consumes the ordinary request budget. */
+const counters=new Map<string,{minute:number;count:number}>();
+export function isCancellationRequest(method:string|undefined,pathname:string){return method==='POST'&&/^\/api\/core\/(?:tasks|test-runs|runner\/executions|runner\/validations)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/cancel$/.test(pathname);}
+export function reserveCancellation(clientId:string,keyId?:string,now=Date.now()){const minute=Math.floor(now/60000),keys=['client:'+clientId,...(keyId?['key:'+keyId]:[])];for(const k of keys){const prior=counters.get(k);if(prior?.minute===minute&&prior.count>=12)return false;}for(const k of keys){const prior=counters.get(k);counters.set(k,{minute,count:prior?.minute===minute?prior.count+1:1});}return true;}

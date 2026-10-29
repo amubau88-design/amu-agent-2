@@ -1,3 +1,4 @@
+import {isCancellationRequest,reserveCancellation} from './cancellation-limits.ts';
 import {outputSchema} from '../inference/output-schema.ts';
 import {amuCore} from '../core/controller.ts';
 import {browserPrincipal,ownerLogin,logoutBrowser,createBrowserSession} from './browser-auth.ts';
@@ -74,6 +75,7 @@ export function authenticate(req: http.IncomingMessage): Client {
   if(!client&&selectedKey&&keyActive(selectedKey)){const application=config.clients.find(c=>c.id===selectedKey.clientId&&!c.admin&&c.enabled&&!c.archivedAt&&!c.revokedAt);if(application)client=scopedKey(application,selectedKey);}
   if (!client) throw new ApiError(401, 'Invalid, expired or revoked API key');
   clientObservations.set(client.id, { lastSeenAt: new Date().toISOString(), remoteAddress: req.socket.remoteAddress || 'unknown' });
+  if(isCancellationRequest(req.method,pathname)){if(!reserveCancellation(client.id,selectedKey?.id))throw new ApiError(429,'Cancellation control rate limit exceeded');return client;}
   const minute = Math.floor(Date.now() / 60000);
   const count = counters.get(client.id);
   if (!count || count.minute !== minute) counters.set(client.id, { minute, count: 1 });
