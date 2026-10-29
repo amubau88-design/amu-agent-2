@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';import {codingProfile} from '../inference/profiles.ts';import {smallCoderQualification} from '../inference/qualification.ts';import {codingAcquisitionPlan} from '../inference/acquisition.ts';const p=codingProfile('qwen25-coder15-q4_0'),G=1024**3;assert.equal(p.artifact.bytes,1066227264);assert.equal(smallCoderQualification(p,17.1*G,8*G).conditionallyFits,true);assert.equal(smallCoderQualification(p,17*G,8*G).conditionallyFits,false);assert.equal(smallCoderQualification(p,18*G,Infinity).conditionallyFits,false);assert.equal(smallCoderQualification(p,18*G,G).conditionallyFits,false);assert.equal(smallCoderQualification({...p,artifact:{...p.artifact,sha256:'0'.repeat(64)}},100*G,8*G).eligible,false);assert.equal(smallCoderQualification(codingProfile('qwen25-coder-7b'),100*G,8*G).eligible,false);assert.equal(codingAcquisitionPlan(p,17.1*G,8*G).resourceFit,false);console.log(JSON.stringify({passed:true,normal20GiBPolicyUnchanged:true,ownerExceptionRequired:true,exactPinnedSmallArtifact:true,downloads:false}));
+
+const {repairFilesFor}=await import('../core/repair-policy.ts');const scope={repairScopes:{http:['handlers.mjs']}};assert.deepEqual(repairFilesFor(scope,{results:[{profileId:'http',status:'failed',executed:true}]},['pricing.mjs','handlers.mjs','unit.mjs']),['handlers.mjs']);assert.deepEqual(repairFilesFor({}, {results:[{profileId:'http',status:'failed',executed:true}]},['pricing.mjs','handlers.mjs']),['pricing.mjs','handlers.mjs']);
+
+const {concisePlanSchema}=await import('../core/agent-tools.ts');const {matchesOutputSchema}=await import('../inference/output-schema.ts');assert.equal(matchesOutputSchema({plan:['Read files','Prepare exact changes','Verify and review']},concisePlanSchema),true);assert.equal(matchesOutputSchema({plan:['x'.repeat(81),'Review']},concisePlanSchema),false);assert.equal(matchesOutputSchema({plan:['One']},concisePlanSchema),false);assert.equal(matchesOutputSchema({plan:['A','B','C','D']},concisePlanSchema),false);
+const {repetitiveOutput,modelWatchdog}=await import('../core/model-watchdog.ts');
+assert.equal(repetitiveOutput("!body||typeof body!=='object'||".repeat(10)),true);
+assert.equal(repetitiveOutput(' '.repeat(2000)),false);
+assert.equal(repetitiveOutput(JSON.stringify({edits:[{path:'a.mjs',find:'a+b',replace:'a*b'}]})),false);
+const watch=modelWatchdog();watch.rejectRepetition();assert.equal(watch.signal.aborted,true);watch.close();
+const {assertDraftSyntax}=await import('../core/anchored-edits.ts');
+assert.throws(()=>assertDraftSyntax('handlers.mjs',"if(return {status:400}) {}"),/Draft syntax/);
+assert.doesNotThrow(()=>assertDraftSyntax('handlers.mjs',"export const valid = x => Number.isInteger(x);"));

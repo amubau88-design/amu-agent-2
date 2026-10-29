@@ -1,2 +1,3 @@
 /** New proposals only: never approves another test run or filesystem application. */
 export function canScheduleRepair(agent:any,report:any){return !!agent&&!(agent.automaticRepairs>=1)&&agent.usage.errors<agent.limits.maxErrors&&agent.usage.modelCalls<agent.limits.maxModelCalls&&report.status==='failed'&&report.results?.some((r:any)=>r.executed===true&&r.result?.sourceExecuted===true&&r.status==='failed');}
+export function repairFilesFor(agent:any,report:any,changedFiles:string[]){const failed=report.results?.find((r:any)=>r.status==='failed'&&r.executed===true);const declared=failed&&agent.repairScopes?.[failed.profileId];return declared?changedFiles.filter(p=>declared.includes(p)):[...changedFiles];}

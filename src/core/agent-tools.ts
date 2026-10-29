@@ -15,6 +15,8 @@ export const agentTools=[
 export const agentDecisionSchema={type:'object',properties:{name:{enum:agentTools.map(t=>t.name)},arguments:{type:'object',properties:{path:text,query:text,changes:{type:'array',items:change,minItems:1,maxItems:8}},additionalProperties:false},explanation:text},required:['name','arguments','explanation'],additionalProperties:false};
 export const flatAgentDecisionSchema={type:'object',properties:{name:{enum:agentTools.map(t=>t.name)},path:text,query:text,changes:{type:'array',items:change,minItems:0,maxItems:8},explanation:text},required:['name','path','query','changes','explanation'],additionalProperties:false};
 export const planSchema={type:'object',properties:{plan:{type:'array',items:text,minItems:1,maxItems:6}},required:['plan'],additionalProperties:false};
+/** Fits the existing 192-token planning allowance instead of relying on verbal brevity alone. */
+export const concisePlanSchema={type:'object',properties:{plan:{type:'array',items:{type:'string',maxLength:80},minItems:2,maxItems:3}},required:['plan'],additionalProperties:false};
 export const reportSchema={type:'object',properties:{summary:text},required:['summary'],additionalProperties:false};
 export function validateAgentCall(input:any){
  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['name','arguments','explanation'].includes(k))||typeof input.explanation!=='string'||input.explanation.length>2000)throw new EngineError(422,'Malformed structured tool decision');
