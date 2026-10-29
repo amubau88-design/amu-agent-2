@@ -38,6 +38,7 @@ port.on('message', async (job) => {
     if (inputTokens + job.maxTokens > Math.min(workerData.contextSize,job.maxContextTokens||workerData.contextSize)) throw Object.assign(new Error('Messages and max_tokens exceed context capacity'), { status: 400 });
     session.setChatHistory(messages.slice(0, -1).map((m: any) => m.role === 'assistant' ? { type: 'model', response: [m.content] } : { type: m.role, text: m.content }));
     const before = sequence.tokenMeter.getState();
+    port.postMessage({type:'generation_stage',id:job.id,phase:'prefill'});
     const content = await session.prompt(messages.at(-1).content, {
       maxTokens: job.maxTokens, temperature: job.temperature,
       signal: controller.signal,
@@ -47,12 +48,13 @@ port.on('message', async (job) => {
         port.postMessage({ type: 'chunk', id: job.id, text });
       },
     });
+    port.postMessage({type:'generation_stage',id:job.id,phase:'validating'});
     if(job.responseSchema){try{if(!matchesOutputSchema(JSON.parse(content),job.responseSchema))throw Error('Schema mismatch');}catch{throw Object.assign(new Error('Structured output did not complete or match its schema within the token limit'),{status:422});}}
     const after = sequence.tokenMeter.getState();
     const usage = { prompt_tokens: after.usedInputTokens - before.usedInputTokens, completion_tokens: after.usedOutputTokens - before.usedOutputTokens };
     response = { type: 'result', id: job.id, content, usage, finishReason: usage.completion_tokens >= job.maxTokens ? 'length' : 'stop', ttftMs: firstTokenMs, durationMs: Date.now() - started };
   } catch (error) {
     response = { type: 'failure', id: job.id, message: (error as Error).message, status: (error as any).status || 503 };
-  } finally { session.dispose(); await sequence.dispose(); activeGeneration=null; }
+  } finally { port.postMessage({type:'generation_stage',id:job.id,phase:'finalizing'});session.dispose(); await sequence.dispose(); activeGeneration=null; }
   port.postMessage(response!);
 });

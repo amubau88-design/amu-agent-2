@@ -9,7 +9,7 @@ import { recordSystemEvent } from '../core/monitoring.ts';
 import { assessModel, assertMemoryBudget } from './resources.ts';
 import {installedProfile,assertProfileContext} from './profiles.ts';
 export type Message = { role: 'system' | 'user' | 'assistant'; content: string };
-export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number; executionId?:string };
+export type Generation = { model: string; messages: Message[]; maxTokens?: number; temperature?: number; signal?: AbortSignal; onChunk?: (text: string) => void; onStage?: (phase:string)=>void; responseSchema?: object; clientId?: string; stream?: boolean; priority?:number; source?:'core'; maxContextTokens?:number; executionId?:string };
 export type GenerationResult = { content: string; usage: { prompt_tokens: number; completion_tokens: number }; finishReason: 'stop' | 'length'; ttftMs: number; durationMs: number };
 
 type Job = { id: string; input: Generation; resolve: (r: GenerationResult) => void; reject: (e: Error) => void; cleanup: () => void; cancel: (reason?: Error) => void; cancelling?:boolean; cancellationTimer?:NodeJS.Timeout };
@@ -74,6 +74,7 @@ export class AMUInferenceEngine {
         if (message.nativeProcess) this.nativeProcess = message.nativeProcess;
         if (message.type === 'ready') { clearTimeout(timer); this.state = 'ready'; this.lastError = null; this.loadTimeMs = Date.now() - loadStarted;this.runtimeProfile={profileId:message.profileId,chatWrapper:message.chatWrapper,tokenizer:message.tokenizer,capabilities:message.capabilities}; resolve(); }
         else if (this.current && message.id === this.current.id) {
+          if(message.type==='generation_stage'){try{this.current?.input.onStage?.(message.phase);}catch{this.current?.cancel(new EngineError(503,'Model progress observation failed'));}return;}
           if (message.type === 'chunk') {
             if(this.current.cancelling)return;
             try { this.current?.input.onChunk?.(message.text); }

@@ -1,0 +1,3 @@
+import {EngineError} from '../inference/models.ts';
+/** Prefill retains the normal request deadline; only observed output/finalization has an idle deadline. */
+export function modelWatchdog(now=Date.now){const controller=new AbortController();let outputAt=0,finalizingAt=0;const check=()=>{if(finalizingAt&&now()-finalizingAt>=10000||outputAt&&!finalizingAt&&now()-outputAt>=20000)controller.abort(new EngineError(422,finalizingAt?'Native model finalization stalled; no decision accepted':'Model output stalled; no decision accepted'));};const timer=setInterval(check,500);timer.unref();return {signal:controller.signal,chunk(){outputAt=now();},stage(value:string){if(value==='finalizing')finalizingAt=now();},check,close(){clearInterval(timer);}};}
