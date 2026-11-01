@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';import {newFunctionValueArithmetic} from '../core/contract-edits.ts';
+const original='export const withDelivery=(base,fee)=>base-fee;';
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,fee)=>base+withDelivery;'),['withDelivery']);
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,fee)=>base+(withDelivery*fee);'),['withDelivery']);
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,fee)=>base+fee;'),[]);
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,withDelivery)=>base+withDelivery;'),[]);
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,fee)=>base+withDelivery.name;'),[]);
+assert.deepEqual(newFunctionValueArithmetic('fees.mjs',original,'export const withDelivery=(base,fee)=>base>0?withDelivery(base-1,fee):fee;'),[]);
+const bad='function value(n){return n+value;}';assert.deepEqual(newFunctionValueArithmetic('x.mjs','function value(n){return n;}',bad),['value']);assert.deepEqual(newFunctionValueArithmetic('x.mjs',bad,bad),[]);
+console.log(JSON.stringify({passed:true,fixtureOnly:true,novelFunctionObjectCoercionRejected:true,shadowingAndConditionalRecursionPreserved:true,noSourceExecutionOrReplacementCode:true}));

@@ -18,7 +18,12 @@ export function rejectRepeatedEdit(agent:any,raw:string) {
       throw new EngineError(422,'Previously rejected edit repeated; propose a different implementation within the existing budget');
   }
 }
+/** Keep rejected code private for validation; do not prime a small model with an invalid replacement. */
+export function recoveryPromptHistory(agent:any) {
+  return (agent.rejectedEdits||[]).slice(-4).map((r:any)=>({path:r.path,fingerprint:r.fingerprint,alreadyRejected:true}));
+}
 export function inheritModelRecovery(parent:any,child:any,targets:string[]) {
+  const metrics=(parent.agent?.modelMetrics||[]).filter((m:any)=>m.status==='completed'&&Number.isFinite(m.wallMs)&&m.wallMs>0);if(metrics.length)child.inheritedModelDurationMs=Math.max(...metrics.slice(-4).map((m:any)=>m.wallMs));
   const a=parent.agent,source=a?.lastModelFailure,path=source?.path||a?.editTarget;
   if(source&&targets.includes(path))child.lastModelFailure={classification:source.classification,message:String(source.message||'').slice(0,240),path,inheritedFromParent:true,untrustedFeedback:true};
   child.rejectedEdits=(a?.rejectedEdits||[]).filter((r:any)=>targets.includes(r.path)).slice(-4);

@@ -1,4 +1,14 @@
 import ts from 'typescript';import path from 'node:path';import {moduleContracts,localModuleChecks,repairAnchors,type ModuleSource} from './module-contracts.ts';
+/** Direct function-object arithmetic is not a recursive numeric computation. Never supplies a repair. */
+export function newFunctionValueArithmetic(filename:string,before:string,after:string){
+ const find=(text:string)=>{const names=new Set<string>(),tree=ts.createSourceFile(filename,text,ts.ScriptTarget.Latest,true),ops=new Set([ts.SyntaxKind.PlusToken,ts.SyntaxKind.MinusToken,ts.SyntaxKind.AsteriskToken,ts.SyntaxKind.SlashToken,ts.SyntaxKind.PercentToken,ts.SyntaxKind.AsteriskAsteriskToken]);
+  const bare=(node:ts.Expression):ts.Expression=>ts.isParenthesizedExpression(node)?bare(node.expression):node;
+  const invalid=(node:ts.Expression,name:string):boolean=>{node=bare(node);if(!ts.isBinaryExpression(node)||!ops.has(node.operatorToken.kind))return false;return [node.left,node.right].some(n=>{const x=bare(n);return ts.isIdentifier(x)&&x.text===name||invalid(x,name);});};
+  for(const s of tree.statements){if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations){if(!ts.isIdentifier(d.name)||!d.initializer||!ts.isArrowFunction(d.initializer)||ts.isBlock(d.initializer.body))continue;const name=d.name.text;if(!d.initializer.parameters.some(p=>ts.isIdentifier(p.name)&&p.name.text===name)&&invalid(d.initializer.body,name))names.add(name);}
+   if(ts.isFunctionDeclaration(s)&&s.name&&s.body?.statements.length===1){const r=s.body.statements[0],name=s.name.text;if(ts.isReturnStatement(r)&&r.expression&&!s.parameters.some(p=>ts.isIdentifier(p.name)&&p.name.text===name)&&invalid(r.expression,name))names.add(name);}}
+  return names;};
+ const prior=find(before);return [...find(after)].filter(n=>!prior.has(n));
+}
 /** Keep existing declared interfaces while the model repairs implementations. Never supplies replacement code. */
 export function requiredExports(filename:string,sources:ModuleSource[],protectedFiles?:string[]){return [...new Set(moduleContracts(sources).filter(c=>!protectedFiles||protectedFiles.includes(c.path)).flatMap(c=>c.imports.filter(i=>i.from.startsWith('.')&&path.posix.normalize(path.posix.join(path.posix.dirname(c.path),i.from))===filename).flatMap(i=>i.names)))];}
 export function lostRequiredExports(filename:string,before:string,after:string,sources:ModuleSource[]){const needed=requiredExports(filename,sources),prior=moduleContracts([{path:filename,content:before}])[0],next=moduleContracts([{path:filename,content:after}])[0];return needed.filter(n=>prior?.exports.includes(n)&&!next?.exports.includes(n));}
