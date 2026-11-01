@@ -2,7 +2,8 @@ import './backup/rollback-guard.ts';
 import { startServer } from './amu-api/server.ts';
 import { initializeCentral,stopAdmissionMonitoring } from './central/service.ts';
 import { amuInference } from './inference/engine.ts';
-import { recordSystemEvent, monitoringStatus, stopMonitoring } from './core/monitoring.ts';
+import { recordSystemEvent, stopMonitoring } from './core/monitoring.ts';
+import {livenessBeat} from './core/heartbeat.ts';
 import fs from 'node:fs';
 import { recoverInterruptedTasks } from './core/controller.ts';
 import {closeIdentityJournal} from './central/idempotency.ts';
@@ -17,8 +18,12 @@ const pidFile = process.env.AMU_PID_FILE || 'scratch/central-server.pid';
 fs.writeFileSync(pidFile, String(process.pid));
 recordSystemEvent('server_started', { port, pid: process.pid });
 void initializeCentral().then(() => recordSystemEvent('engine_ready', { backend: 'embedded' })).catch(error => recordSystemEvent('engine_load_error', { category: error.name }));
+let heartbeatPending=false,lastHeartbeatTick=Date.now();
 const heartbeat = setInterval(() => {
-  if (process.connected) process.send?.({ type: 'heartbeat', engine: amuInference.status(), process: monitoringStatus() });
+  if(!process.connected||heartbeatPending)return;
+  const now=Date.now(),message=livenessBeat(lastHeartbeatTick,now,process.memoryUsage().rss);lastHeartbeatTick=now;heartbeatPending=true;
+  try{process.send?.(message,error=>{heartbeatPending=false;if(error)recordSystemEvent('heartbeat_ipc_error');});}
+  catch{heartbeatPending=false;recordSystemEvent('heartbeat_ipc_error');}
 }, 5000); heartbeat.unref();
 let stopping = false;
 async function shutdown(code: number) {
