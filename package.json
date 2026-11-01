@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.33.0",
+  "version": "1.34.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -64,7 +64,8 @@
     "test:session33": "node src/tests/session33-provenance.test.mjs && node src/tests/session33-controller.test.mjs && node src/tests/session33-migration.test.mjs",
     "migration:check": "node scripts/migration-readiness.mjs",
     "test:session34": "node src/tests/session34-policy.test.mjs && node src/tests/session34-chain.test.mjs",
-    "test:session35": "node src/tests/session35-evidence.test.mjs && node src/tests/session35-repair.test.mjs && node src/tests/session35-qualification.test.mjs && node src/tests/session35-contract-edits.test.mjs && node src/tests/session35-cancellation.test.mjs"
+    "test:session35": "node src/tests/session35-evidence.test.mjs && node src/tests/session35-repair.test.mjs && node src/tests/session35-qualification.test.mjs && node src/tests/session35-contract-edits.test.mjs && node src/tests/session35-cancellation.test.mjs",
+    "test:session36": "node src/tests/session36-policy.test.mjs && node src/tests/session36-continuation.test.mjs && node src/tests/session36-guards.test.mjs && node src/tests/session36-reserve-api.test.mjs && node src/tests/session36-backends.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",

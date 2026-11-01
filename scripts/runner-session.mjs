@@ -12,6 +12,11 @@ export function runnerSessionScript(minutes){if(!Number.isInteger(minutes)||minu
 export XDG_RUNTIME_DIR=/run/user/1000
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 unit=amu-runner27.service
+umask 077
+lock="$XDG_RUNTIME_DIR/amu-runner27-session.lock"
+if [ -L "$lock" ]; then printf 'Linked session lock refused\\n'; exit 1; fi
+exec 9>>"$lock"
+if ! /usr/bin/flock -n 9; then printf 'Existing bounded runner session retained; refuse competing owner\\n'; exit 1; fi
 if systemctl --user is-active --quiet "$unit"; then printf 'Existing runner service retained; refuse competing session\\n'; exit 1; fi
 cleanup(){ systemctl --user stop "$unit"; }
 trap cleanup EXIT

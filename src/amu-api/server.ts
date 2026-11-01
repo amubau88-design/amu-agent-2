@@ -107,7 +107,7 @@ export function createAmuApiServer(): http.Server {
         res.on('close', disconnect);
         try {
           let result;
-          if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.autoRepairChain!==undefined)requireAdmin(client);if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
+          if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.autoRepairChain!==undefined||body?.minimumFreeDiskMiB!==undefined)requireAdmin(client);if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/repair-chain$/.test(pathname)&&req.method==='GET')result=amuCore.repairChainStatus(pathname.split('/').at(-2)!,client.id,client.admin);
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/inspect$/.test(pathname)&&req.method==='POST'){if(body?.version!==1||!['show_diff','request_approval','prepare_commit'].includes(body?.name)||!body.arguments||Object.keys(body.arguments).length)throw new ApiError(400,'Invalid task inspection protocol');result=await amuCore.inspect(pathname.split('/').at(-2)!,body.name,client.id,client.admin);}
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/(repair-merge-plan|repair-merge)$/.test(pathname)&&req.method==='POST'){requireAdmin(client);const id=pathname.split('/').at(-2)!;result=pathname.endsWith('/repair-merge-plan')?amuCore.prepareRepairMerge(id,body?.repairTaskId,client.id,true):await amuCore.stageRepairMerge(id,body,client.id,true,controller.signal);}

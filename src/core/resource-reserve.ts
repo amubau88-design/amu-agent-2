@@ -1,0 +1,3 @@
+import fs from 'node:fs';import {EngineError} from '../inference/models.ts';
+export function diskReserveMiB(value:unknown){if(value===undefined)return undefined;if(!Number.isSafeInteger(value)||Number(value)<14336||Number(value)>65536)throw new EngineError(400,'Disk reserve must be an integer from 14336 to 65536 MiB');return Number(value);}
+export function assertDiskReserve(value:unknown,available?:number){const reserve=diskReserveMiB(value);if(reserve===undefined)return;const disk=available===undefined?fs.statfsSync(process.cwd()):null,free=available??disk!.bavail*disk!.bsize;if(!Number.isFinite(free)||free<reserve*1048576)throw new EngineError(409,'Disk reserve exhausted; stop new model and isolated execution requests');}
