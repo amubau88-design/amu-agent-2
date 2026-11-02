@@ -1,6 +1,6 @@
 {
   "name": "amu-agent-2",
-  "version": "1.36.0",
+  "version": "1.37.0",
   "description": "Autonomous Local AI Developer Engine & API for AMU Platform",
   "main": "dist/index.js",
   "type": "module",
@@ -67,7 +67,8 @@
     "test:session35": "node src/tests/session35-evidence.test.mjs && node src/tests/session35-repair.test.mjs && node src/tests/session35-qualification.test.mjs && node src/tests/session35-contract-edits.test.mjs && node src/tests/session35-cancellation.test.mjs",
     "test:session36": "node src/tests/session36-policy.test.mjs && node src/tests/session36-continuation.test.mjs && node src/tests/session36-guards.test.mjs && node src/tests/session36-reserve-api.test.mjs && node src/tests/session36-backends.test.mjs",
     "test:session37": "node src/tests/session37-recovery.test.mjs && node src/tests/session37-controller.test.mjs",
-    "test:session38": "node src/tests/session38-window.test.mjs && node src/tests/session38-controller-window.test.mjs && node src/tests/session38-arithmetic.test.mjs && node src/tests/session38-owner-ui.test.mjs"
+    "test:session38": "node src/tests/session38-window.test.mjs && node src/tests/session38-controller-window.test.mjs && node src/tests/session38-arithmetic.test.mjs && node src/tests/session38-owner-ui.test.mjs",
+    "test:session40": "node src/tests/session40-checkpoints.test.mjs && node src/tests/session40-contract-examples.test.mjs && node src/tests/session40-model-context.test.mjs && node src/tests/session40-status.test.mjs && node src/tests/session40-worker-recovery.test.mjs"
   },
   "keywords": [],
   "author": "AMU Team",

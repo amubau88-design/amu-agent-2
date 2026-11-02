@@ -1,0 +1,3 @@
+import assert from 'node:assert/strict';import {contractExamples} from '../core/contract-examples.ts';
+const sources=[{path:'units.mjs',content:'export const convert=x=>x-1;'},{path:'unit.mjs',content:"import {convert as run} from './units.mjs';assert.equal(run(-40),-40);assert.equal(run(0),32);assert.equal(other(0),99);assert.equal(run(secret()),0);"}];
+assert.deepEqual(contractExamples('units.mjs',sources,['unit.mjs']).map(x=>[x.call,x.expected]),[['run(-40)','-40'],['run(0)','32']]);assert.equal(contractExamples('units.mjs',sources,[]).length,0);assert.equal(contractExamples('other.mjs',sources,['unit.mjs']).length,0);console.log('Literal alias-bound frozen contract examples extracted; no code execution or synthesized repair');

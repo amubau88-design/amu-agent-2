@@ -1,0 +1,102 @@
+{
+  "name": "S40 temperature-stock-shipping",
+  "isolationRequired": true,
+  "files": {
+    "convert.mjs": "export const fahrenheit = celsius => celsius * 9 / 5 - 32;\n",
+    "stock.mjs": "export const available = (total,reserved) => Math.max(0,total + reserved);\n",
+    "shipping.mjs": "export const shipping = (subtotal,delivery) => subtotal - delivery;\n",
+    "handlers.mjs": "import http from 'node:http';import {fahrenheit} from './convert.mjs';import {available} from './stock.mjs';import {shipping} from './shipping.mjs';\nexport const handle=b=>({fahrenheit:fahrenheit(b.celsius),available:available(b.total,b.reserved),shipping:shipping(b.subtotal,b.delivery)});\nexport const createApp=()=>http.createServer(async(req,res)=>{try{let s='';for await(const c of req)s+=c;res.setHeader('content-type','application/json');res.end(JSON.stringify(handle(JSON.parse(s))));}catch{res.statusCode=400;res.end('{}');}});\n",
+    "unit.mjs": "import test from 'node:test';import assert from 'node:assert/strict';import {fahrenheit} from './convert.mjs';import {available} from './stock.mjs';import {shipping} from './shipping.mjs';import './regression.mjs';\ntest('temperature contract',()=>{assert.equal(fahrenheit(0),32);assert.equal(fahrenheit(100),212);});\ntest('stock contract',()=>{assert.equal(available(10,3),7);assert.equal(available(2,5),0);});\ntest('delivery contract',()=>assert.equal(shipping(14,3),17));\n",
+    "regression.mjs": "import test from 'node:test';import assert from 'node:assert/strict';import {fahrenheit} from './convert.mjs';import {available} from './stock.mjs';import {shipping} from './shipping.mjs';\ntest('negative temperature',()=>assert.equal(fahrenheit(-40),-40));test('empty stock',()=>assert.equal(available(0,0),0));test('zero delivery',()=>assert.equal(shipping(2.5,0),2.5));\n",
+    "integration.mjs": "import test from 'node:test';import assert from 'node:assert/strict';import {createApp} from './handlers.mjs';\ntest('combined HTTP contract',async()=>{const app=createApp();await new Promise(r=>app.listen(0,'127.0.0.1',r));try{const r=await fetch('http://127.0.0.1:'+app.address().port,{method:'POST',headers:{Connection:'close'},body:JSON.stringify({celsius:20,total:12,reserved:5,subtotal:14,delivery:3})});assert.equal(r.status,200);assert.deepEqual(await r.json(),{fahrenheit:68,available:7,shipping:17});}finally{app.closeAllConnections();await new Promise(r=>app.close(r));}});\n",
+    "package.json": "{\"type\":\"module\",\"scripts\":{\"build\":\"node --check convert.mjs && node --check stock.mjs && node --check shipping.mjs && node --check handlers.mjs\"}}"
+  },
+  "fileGoals": {
+    "convert.mjs": "Convert the input celsius temperature to Fahrenheit; preserve the existing public export.",
+    "stock.mjs": "Compute nonnegative remaining stock from total inventory minus reserved inventory.",
+    "shipping.mjs": "Add the delivery charge to the subtotal amount. Preserve input parameter names and public export."
+  },
+  "protectedFiles": [
+    "handlers.mjs",
+    "unit.mjs",
+    "regression.mjs",
+    "integration.mjs",
+    "package.json"
+  ],
+  "profiles": [
+    {
+      "id": "s29-build",
+      "kind": "build",
+      "executable": "npm",
+      "arguments": [
+        "run",
+        "build"
+      ],
+      "limits": {
+        "wallTimeMs": 10000,
+        "memoryMiB": 512,
+        "cpuCount": 1,
+        "processCount": 32,
+        "outputBytes": 8192
+      }
+    },
+    {
+      "id": "s29-syntax",
+      "kind": "typecheck",
+      "executable": "node",
+      "arguments": [
+        "--check",
+        "handlers.mjs"
+      ],
+      "limits": {
+        "wallTimeMs": 10000,
+        "memoryMiB": 512,
+        "cpuCount": 1,
+        "processCount": 32,
+        "outputBytes": 8192
+      }
+    },
+    {
+      "id": "s29-unit",
+      "kind": "unit",
+      "executable": "node",
+      "arguments": [
+        "--test",
+        "unit.mjs"
+      ],
+      "limits": {
+        "wallTimeMs": 10000,
+        "memoryMiB": 512,
+        "cpuCount": 1,
+        "processCount": 32,
+        "outputBytes": 8192
+      }
+    },
+    {
+      "id": "s29-integration",
+      "kind": "integration",
+      "executable": "node",
+      "arguments": [
+        "--test",
+        "integration.mjs"
+      ],
+      "limits": {
+        "wallTimeMs": 10000,
+        "memoryMiB": 512,
+        "cpuCount": 1,
+        "processCount": 32,
+        "outputBytes": 8192
+      }
+    }
+  ],
+  "initialHashes": {
+    "convert.mjs": "809c3a58da0e04834768195f630f6cf9c9a8b15f1da1e972462dd3e77f8a0b94",
+    "stock.mjs": "1bd41a3657469ddba29af710003a2edff652ebd1d2001977ade23614ffffa776",
+    "shipping.mjs": "8f43f02348912f6e24469f916e719a838ddeb9b82b345bc4286e60a6e3a2c05e",
+    "handlers.mjs": "862f12ac63f35aa3b7c282e4a7b666a190c3a828c792777db9564cb466bd4fdd",
+    "unit.mjs": "15d87f0223c8684ba84285027607fc3e1b9dfc295d060813a8ba63d01c859da4",
+    "regression.mjs": "ff6ecb1a13a62bba67332f8fae29a07784a5d18f1b52c20cb2097c8c03a27665",
+    "integration.mjs": "d5a20f9f853d4d05a337a04e20e4a200c3634b7142d7bd18a40abd93cb069931",
+    "package.json": "2a3968aeab2c1a9340f759150741b98b90086375cc8024a87227bdd5a8823c70"
+  }
+}

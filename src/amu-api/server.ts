@@ -15,7 +15,7 @@ import path from 'node:path';
 import { handleApiRequest } from './routes.ts';
 import { ApiError, authenticate, requireAdmin, centralRoute, health, requireScope,unauthenticatedBrowserRoute } from '../central/service.ts';
 import { EngineError } from '../inference/models.ts';
-import { amuCore } from '../core/controller.ts';
+import { amuCore,taskCheckpointJournal } from '../core/controller.ts';
 import {streamTaskEvents} from '../core/task-events.ts';
 import { recordSystemEvent } from '../core/monitoring.ts';
 import { bindHost, tlsOptions, validateNetworkConfiguration, checkNetworkAccess } from '../central/network.ts';
@@ -56,6 +56,8 @@ export function createAmuApiServer(): http.Server {
       const maintenanceRead=!!maintenanceStatus().operation&&req.method==='GET'&&['/api/client/status','/api/central/dashboard'].includes(pathname);
       if(!pathname.startsWith('/api/central/backups')&&!maintenanceRead){const leave=enterRequest();res.once('finish',leave);res.once('close',leave);}
       if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status') requireAdmin(client);
+      if(req.method==='GET'&&pathname==='/ai/active'){requireAdmin(client);const tasks=amuCore.list(client.id,true).filter(t=>['planning','running'].includes(t.state));res.end(JSON.stringify({busy:amuCore.isBusy(),inference:amuInference.status().active,tasks:tasks.map(t=>({id:t.id,state:t.state,phase:t.agent?.phase,steps:t.agent?.usage.steps,modelCalls:t.agent?.usage.modelCalls})),checkpoints:taskCheckpointJournal().status()}));return;}
+      if(req.method==='GET'&&pathname==='/metrics'){requireAdmin(client);const e=amuInference.status();res.setHeader('Content-Type','text/plain; version=0.0.4; charset=utf-8');res.end('amu_inference_ready '+Number(e.ready)+'\namu_inference_active '+e.active+'\namu_inference_queued '+e.queued+'\namu_coding_busy '+Number(amuCore.isBusy())+'\n');return;}
       let body: any = null;
       if (pathname!=='/api/central/backups/import'&&['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
         const chunks: Buffer[] = []; let size = 0;
@@ -107,7 +109,7 @@ export function createAmuApiServer(): http.Server {
         res.on('close', disconnect);
         try {
           let result;
-          if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.autoRepairChain!==undefined||body?.minimumFreeDiskMiB!==undefined)requireAdmin(client);if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
+          if (pathname === '/api/core/tasks' && req.method === 'POST') { if(body?.autoRepairChain!==undefined||body?.minimumFreeDiskMiB!==undefined||body?.workerCrashRecovery===true)requireAdmin(client);if(body?.background===true){result=amuCore.submit(body,client.id);res.statusCode=202;}else result = await amuCore.create(body, client.id, controller.signal); }
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/repair-chain$/.test(pathname)&&req.method==='GET')result=amuCore.repairChainStatus(pathname.split('/').at(-2)!,client.id,client.admin);
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/inspect$/.test(pathname)&&req.method==='POST'){if(body?.version!==1||!['show_diff','request_approval','prepare_commit'].includes(body?.name)||!body.arguments||Object.keys(body.arguments).length)throw new ApiError(400,'Invalid task inspection protocol');result=await amuCore.inspect(pathname.split('/').at(-2)!,body.name,client.id,client.admin);}
           else if(/^\/api\/core\/tasks\/[a-f0-9-]{36}\/(repair-merge-plan|repair-merge)$/.test(pathname)&&req.method==='POST'){requireAdmin(client);const id=pathname.split('/').at(-2)!;result=pathname.endsWith('/repair-merge-plan')?amuCore.prepareRepairMerge(id,body?.repairTaskId,client.id,true):await amuCore.stageRepairMerge(id,body,client.id,true,controller.signal);}
