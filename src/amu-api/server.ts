@@ -1,3 +1,5 @@
+import {requireBrowserOrigin} from '../central/browser-auth.ts';
+import {startOptionalLan} from '../central/lan-listener.ts';
 import {createCandidateSnapshot} from '../core/runner-preflight.ts';
 import {candidateCheck,checkCandidate} from '../core/candidate-checks.ts';
 import {runnerManagementRoute} from '../core/runner-routes.ts';
@@ -27,8 +29,8 @@ import {createChangeSet,listChangeSets,readChangeSet,actOnChangeSet} from '../co
 import {developmentGit} from '../core/development-git.ts';
 import {runnerCapabilities,listTestReports,runDevelopmentTest,cancelTest} from '../core/development-runner.ts';
 
-export function createAmuApiServer(): http.Server {
-  validateNetworkConfiguration();
+export function createAmuApiServer(policy={validate:validateNetworkConfiguration,check:checkNetworkAccess,tls:tlsOptions}): http.Server {
+  policy.validate();
   setBackupIdleCheck(()=>!amuCore.isBusy()&&!amuInference.status().active&&!amuInference.status().queued);
   const handler: http.RequestListener = async (req, res) => {
     const requestId = crypto.randomUUID();
@@ -37,8 +39,10 @@ export function createAmuApiServer(): http.Server {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
     try {
-      checkNetworkAccess(req.socket.remoteAddress || '');
-      const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+      policy.check(req.socket.remoteAddress || '');
+      const requestedPath = new URL(req.url || '/', 'http://localhost').pathname;
+      const pathname=requestedPath==='/owner/verify'?'/api/auth/owner-login':requestedPath;
+      if(pathname==='/owner/register'&&req.method==='POST'){if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress||''))throw new ApiError(403,'Owner setup is local only');const owner=authenticate(req);requireAdmin(owner);requireBrowserOrigin(req);res.end(JSON.stringify({registered:true,authenticated:true,verificationEndpoint:'/owner/verify',newLoginRequires:'Windows owner helper',publicCodeIssuance:false,keysReset:false}));return;}
       if (req.method === 'GET' && ['/', '/index.html', '/admin'].includes(pathname)) {
         const filename = pathname === '/admin' ? 'admin.html' : 'index.html';
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -52,11 +56,11 @@ export function createAmuApiServer(): http.Server {
       }
       const client = authenticate(req);
       const started=Date.now();let observed=false;const observe=()=>{if(observed)return;observed=true;if(!maintenanceStatus().operation&&!pathname.startsWith('/api/central/backups')){observeRequest(client.id,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);if(client.credentialId)observeRequest('key:'+client.credentialId,res.writableEnded?res.statusCode:499,Date.now()-started,requestId,req.method,pathname);}};res.once('finish',observe);res.once('close',observe);
-      checkNetworkAccess(req.socket.remoteAddress || '', client.admin);
+      policy.check(req.socket.remoteAddress || '', client.admin);
       const maintenanceRead=!!maintenanceStatus().operation&&req.method==='GET'&&['/api/client/status','/api/central/dashboard'].includes(pathname);
       if(!pathname.startsWith('/api/central/backups')&&!maintenanceRead){const leave=enterRequest();res.once('finish',leave);res.once('close',leave);}
-      if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status') requireAdmin(client);
-      if(req.method==='GET'&&pathname==='/ai/active'){requireAdmin(client);const tasks=amuCore.list(client.id,true).filter(t=>['planning','running'].includes(t.state));res.end(JSON.stringify({busy:amuCore.isBusy(),inference:amuInference.status().active,tasks:tasks.map(t=>({id:t.id,state:t.state,phase:t.agent?.phase,steps:t.agent?.usage.steps,modelCalls:t.agent?.usage.modelCalls})),checkpoints:taskCheckpointJournal().status()}));return;}
+      if (!pathname.startsWith('/v1/') && !pathname.startsWith('/api/central/') && !pathname.startsWith('/api/core/') && pathname !== '/api/client/status' && pathname !== '/ai/active') requireAdmin(client);
+      if(req.method==='GET'&&pathname==='/ai/active'){requireScope(client,'models:read');const e=amuInference.status();if(!client.admin){if(client.models.length&&!client.models.includes(e.model))throw new ApiError(403,'Model access denied');res.end(JSON.stringify({ready:e.ready,model:e.model,ctxSize:e.hardware.contextSize,loadMs:e.loadTimeMs}));return;}const tasks=amuCore.list(client.id,true).filter(t=>['planning','running'].includes(t.state));res.end(JSON.stringify({ready:e.ready,model:e.model,ctxSize:e.hardware.contextSize,loadMs:e.loadTimeMs,busy:amuCore.isBusy(),inference:amuInference.status().active,tasks:tasks.map(t=>({id:t.id,state:t.state,phase:t.agent?.phase,steps:t.agent?.usage.steps,modelCalls:t.agent?.usage.modelCalls})),checkpoints:taskCheckpointJournal().status()}));return;}
       if(req.method==='GET'&&pathname==='/metrics'){requireAdmin(client);const e=amuInference.status();res.setHeader('Content-Type','text/plain; version=0.0.4; charset=utf-8');res.end('amu_inference_ready '+Number(e.ready)+'\namu_inference_active '+e.active+'\namu_inference_queued '+e.queued+'\namu_coding_busy '+Number(amuCore.isBusy())+'\n');return;}
       let body: any = null;
       if (pathname!=='/api/central/backups/import'&&['POST', 'PUT', 'PATCH'].includes(req.method || '')) {
@@ -144,7 +148,7 @@ export function createAmuApiServer(): http.Server {
       res.end(JSON.stringify({ error: { message: status===507?'Nicht genügend freier RAM nach Systemreserve. Kleineres Modell oder kürzeren Kontext wählen und den Worker-Status prüfen.':error instanceof ApiError || (error instanceof EngineError && error.status < 500) ? error.message : 'Local inference or service unavailable', type: status < 500 ? 'invalid_request_error' : 'server_error', code: String(status), reason: ({400:'invalid_request',401:'authentication_failed',403:'permission_denied',404:'not_found',409:'state_conflict',429:'resource_limit',499:'cancelled',503:'service_unavailable',504:'deadline_exceeded',507:'insufficient_memory'} as Record<number,string>)[status]||'request_failed' }, requestId }));
     }
   };
-  const tls = tlsOptions();
+  const tls = policy.tls();
   const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
   server.maxConnections=platform.maxHttpRequests*4;
   server.requestTimeout = 120000;
@@ -156,6 +160,6 @@ export function startServer(port = Number(process.env.PORT) || 3030): Promise<ht
   return new Promise((resolve, reject) => {
     const server = createAmuApiServer();
     server.once('error', reject);
-    server.listen(port, bindHost, () => { console.log(`AMU API listening on ${JSON.stringify(server.address())}`); resolve(server); });
+    server.listen(port, bindHost, () => { void startOptionalLan(server,policy=>createAmuApiServer(policy)).then(()=>{console.log(`AMU API listening on ${JSON.stringify(server.address())}`);resolve(server);},reject); });
   });
 }

@@ -1,3 +1,4 @@
+import {stopLanListener} from './central/lan-listener.ts';
 import './backup/rollback-guard.ts';
 import { startServer } from './amu-api/server.ts';
 import { initializeCentral,stopAdmissionMonitoring } from './central/service.ts';
@@ -31,7 +32,7 @@ async function shutdown(code: number) {
   clearInterval(heartbeat); recordSystemEvent('server_stopping', { code });
   stopBackupScheduler();stopAdmissionMonitoring();
   const force = setTimeout(() => process.exit(code), 8000); force.unref();
-  server.close(); server.closeAllConnections();
+  stopLanListener();server.close(); server.closeAllConnections();
   await amuInference.close(); closeIdentityJournal(); stopMonitoring();
   try { if (fs.readFileSync(pidFile, 'utf8').trim() === String(process.pid)) fs.unlinkSync(pidFile); } catch {}
   process.exit(code);

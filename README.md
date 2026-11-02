@@ -49,3 +49,9 @@ Historischer Quellstand: **1.22.0 – geprüfte Neustart-Evidenz, Sicherungen un
 Historischer Quellstand: **1.23.0 – Hypervisor nach Neustart korrekt erkennen und WSL-Bereitstellung nachvollziehbar prüfen**. Laufende API 1.22.0; tatsächliche Linux-/Containerabnahme separat. [Sitzung 25: Dienste, WSL und Freigaben](docs/session25-wsl-runner.md). npm run test:session25.
 
 Aktueller Quellstand: **1.24.0 – echter Rootless-Runner-Abnahmelauf, umask-sichere Eingaben und Core-Dump-Schutz**. Ein kleiner Qwen-Codekorrekturtest lief tatsächlich im Container; zentrale Produktionsaktivierung bleibt separat. [Sitzung 26: reale Ergebnisse und Grenzen](docs/session26-rootless-real-runner.md). npm run test:session26.
+
+## Lokaler Betriebsstand 1.37.1
+
+Qwen2.5-1.5B ist mit Kontext 16.384 aktiv. Zusätzlich zur lokalen Verwaltung auf Port 3030 ist auf diesem Rechner HTTPS unter `https://192.168.2.100:8080/v1` für individuelle Client-Schlüssel eingerichtet; Administration bleibt lokal geschützt. Die Windows-Firewall begrenzt den Zugang auf Ethernet und `192.168.2.0/24`. Ein zweiter physischer Client ist noch nicht abgenommen. Qwen3-14B wurde nicht installiert. Der lokale Eigentümerzugang wurde im echten Browser bestätigt.
+
+[Genauer Ecosystem-Status und verbleibende Blockaden](FINAL_STATUS.md), [gefundene Pfade](FINAL_PATHS.md), [LAN-Betrieb und Rücknahme](docs/ecosystem-lan-readiness.md). Dieser Patch ist keine vollständige Ecosystem-Produktionsfreigabe; der frühere begrenzte v1.37.0-Nachweis bleibt gültig.

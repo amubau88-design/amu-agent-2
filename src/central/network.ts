@@ -1,3 +1,4 @@
+import {lanListenerStatus} from './lan-listener.ts';
 import {loadNetworkProfile,tlsFile} from './network-profile.ts';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -28,4 +29,4 @@ export function checkNetworkAccess(remote: string, admin = false) {
   if (!version || !allowed.check(address, version === 4 ? 'ipv4' : 'ipv6')) throw new EngineError(403, 'Source address is not allowed');
   if (admin && !(process.env.AMU_ALLOW_REMOTE_ADMIN!==undefined?process.env.AMU_ALLOW_REMOTE_ADMIN==='true':profile.allowRemoteAdmin)) throw new EngineError(403, 'Remote administration is disabled');
 }
-export function networkStatus() { return { bindHost, tls: !!((process.env.AMU_TLS_CERT && process.env.AMU_TLS_KEY)||(profile.certificate&&profile.privateKey)), allowedCidrs: cidrs, remoteAdministration: process.env.AMU_ALLOW_REMOTE_ADMIN!==undefined?process.env.AMU_ALLOW_REMOTE_ADMIN==='true':profile.allowRemoteAdmin }; }
+export function networkStatus() { const lan=lanListenerStatus();return {...(lan.enabled?{lanListener:lan}:{}),bindHost, tls: !!((process.env.AMU_TLS_CERT && process.env.AMU_TLS_KEY)||(profile.certificate&&profile.privateKey)), allowedCidrs: cidrs, remoteAdministration: process.env.AMU_ALLOW_REMOTE_ADMIN!==undefined?process.env.AMU_ALLOW_REMOTE_ADMIN==='true':profile.allowRemoteAdmin }; }
